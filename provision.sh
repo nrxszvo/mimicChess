@@ -31,6 +31,9 @@ if [ ! -d "${HOME}/git/mimicChess" ]; then
 	cd git
 	git clone "https://${GHTOKEN}@github.com/nrxszvo/mimicChess.git"
 	cd mimicChess
+	git submodule set-url -- lib/pgnUtils "https://${GHTOKEN}@github.com/nrxszvo/pgnUtils.git"
+	git submodule update --init --recursive
+
 	if [ ! -e "datasets" ]; then
 		datadir=$(ls ~ | grep mimicChess)
 		ln -s ${HOME}/${datadir}/datasets .
