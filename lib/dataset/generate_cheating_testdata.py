@@ -6,8 +6,8 @@ from multiprocessing import Process, Queue
 
 import chess
 import numpy as np
-import pgnUtils.inference as inf
-from pgnUtils import PrintSafe, get_eta, mvid_to_uci, uci_to_mvid
+import pgnutils.inference as inf
+from pgnutils import PrintSafe, get_eta, mvid_to_uci, uci_to_mvid
 
 from mmcdataset import load_data
 

@@ -9,7 +9,7 @@ import time
 import wget
 from multiprocessing import Queue, Process
 
-from pgnUtils import timeit, DataWriter, PrintSafe, resize_mmaps
+from pgnutils import timeit, DataWriter, PrintSafe, resize_mmaps
 
 
 def collect_existing_npy(npy_dir):

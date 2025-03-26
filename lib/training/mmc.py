@@ -13,8 +13,8 @@ from torch.optim.lr_scheduler import (
 )
 from torch.distributions.normal import Normal
 
-from model import ModelArgs, Transformer
-from mmcdataset import NOOP
+from .model import ModelArgs, Transformer
+from .mmcdataset import NOOP
 
 
 @dataclass
@@ -187,18 +187,25 @@ class MimicChessModule(L.LightningModule):
             tc_groups = batch["tc_groups"]
             elo_groups = batch["elo_groups"]
             bs, seqlen, ntc, nelo, npred = pred.shape
-            index = tc_groups[:, None, None, None, None].expand(
-                [bs, seqlen, 1, nelo, npred]
-            )
+            index = tc_groups[:, None, None, None, None].expand([
+                bs,
+                seqlen,
+                1,
+                nelo,
+                npred,
+            ])
             pred = torch.gather(pred, 2, index).squeeze(2)
 
             preds = []
             for i in [0, 1]:
                 subpred = pred[:, i::2]
                 seqlen = subpred.shape[1]
-                index = elo_groups[:, i, None, None, None].expand(
-                    [bs, seqlen, 1, npred]
-                )
+                index = elo_groups[:, i, None, None, None].expand([
+                    bs,
+                    seqlen,
+                    1,
+                    npred,
+                ])
                 subpred = torch.gather(subpred, 2, index).squeeze(2)
                 subpred = subpred.permute(0, 2, 1)
                 subpred = subpred[:, :, self.opening_moves :]
@@ -326,16 +333,14 @@ class MimicChessModule(L.LightningModule):
             mask = F.one_hot(tgts, probs.shape[1]).permute(0, 2, 1)
             tprobs = (probs * mask).sum(dim=1)
 
-            move_data = to_numpy(
-                {
-                    "sorted_tokens": smoves,
-                    "sorted_probs": sprobs,
-                    "target_probs": tprobs,
-                    "openings": batch["opening"],
-                    "targets": tgts,
-                    "loss": move_loss.item(),
-                }
-            )
+            move_data = to_numpy({
+                "sorted_tokens": smoves,
+                "sorted_probs": sprobs,
+                "target_probs": tprobs,
+                "openings": batch["opening"],
+                "targets": tgts,
+                "loss": move_loss.item(),
+            })
 
         if elo_pred is not None:
             sprobs = None
@@ -387,21 +392,19 @@ class MimicChessModule(L.LightningModule):
                     m = Normal(elo_pred[:, 0], elo_pred[:, 1].clamp(min=1e-6))
                     cdf_score = 1 - 2 * (m.cdf(tgts) - 0.5).abs()
 
-            elo_data = to_numpy(
-                {
-                    "sorted_probs": sprobs,
-                    "sorted_groups": sgrps,
-                    "target_probs": tprobs,
-                    "adjacent_probs": adjprobs,
-                    "cdf_score": cdf_score,
-                    "target_groups": tgts,
-                    "loss": elo_loss.item(),
-                    "location_error": loc_err,
-                    "average_std": avg_std,
-                    "elo_mean": u_loc_preds,
-                    "elo_std": u_std_preds,
-                }
-            )
+            elo_data = to_numpy({
+                "sorted_probs": sprobs,
+                "sorted_groups": sgrps,
+                "target_probs": tprobs,
+                "adjacent_probs": adjprobs,
+                "cdf_score": cdf_score,
+                "target_groups": tgts,
+                "loss": elo_loss.item(),
+                "location_error": loc_err,
+                "average_std": avg_std,
+                "elo_mean": u_loc_preds,
+                "elo_std": u_std_preds,
+            })
 
         return move_data, elo_data
 

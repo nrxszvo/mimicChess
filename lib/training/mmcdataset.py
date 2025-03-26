@@ -1,11 +1,13 @@
-import numpy as np
-import os
-import torch
-from torch.utils.data import Dataset, DataLoader
-import lightning as L
 import json
-from pgn import NOOP, STARTMV
+import os
 from collections import OrderedDict
+
+import lightning as L
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Dataset
+
+from ..pgnutils import NOOP, STARTMV
 
 
 def init_worker(seed):
@@ -292,35 +294,33 @@ def load_data(dirname, load_cheatdata=False):
     for blkdn in fmd["block_dirs"]:
         dn = os.path.join(dirname, blkdn)
         md = np.load(os.path.join(dn, "md.npy"), allow_pickle=True).item()
-        blocks.append(
-            {
-                "md": md,
-                "welos": np.memmap(
-                    os.path.join(dn, "welos.npy"),
-                    mode="r",
-                    dtype="int16",
-                    shape=md["ngames"],
-                ),
-                "belos": np.memmap(
-                    os.path.join(dn, "belos.npy"),
-                    mode="r",
-                    dtype="int16",
-                    shape=md["ngames"],
-                ),
-                "mvids": np.memmap(
-                    os.path.join(dn, "mvids.npy"),
-                    mode="r",
-                    dtype="int16",
-                    shape=md["nmoves"],
-                ),
-                "timectl": np.memmap(
-                    os.path.join(dn, "timeCtl.npy"), mode="r", dtype="int16"
-                ),
-                "increment": np.memmap(
-                    os.path.join(dn, "inc.npy"), mode="r", dtype="int16"
-                ),
-            }
-        )
+        blocks.append({
+            "md": md,
+            "welos": np.memmap(
+                os.path.join(dn, "welos.npy"),
+                mode="r",
+                dtype="int16",
+                shape=md["ngames"],
+            ),
+            "belos": np.memmap(
+                os.path.join(dn, "belos.npy"),
+                mode="r",
+                dtype="int16",
+                shape=md["ngames"],
+            ),
+            "mvids": np.memmap(
+                os.path.join(dn, "mvids.npy"),
+                mode="r",
+                dtype="int16",
+                shape=md["nmoves"],
+            ),
+            "timectl": np.memmap(
+                os.path.join(dn, "timeCtl.npy"), mode="r", dtype="int16"
+            ),
+            "increment": np.memmap(
+                os.path.join(dn, "inc.npy"), mode="r", dtype="int16"
+            ),
+        })
     data["blocks"] = blocks
     return data
 

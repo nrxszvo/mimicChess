@@ -1,18 +1,10 @@
 import argparse
 import os
-
-import sys
 from datetime import datetime
 
 import torch
-from config import get_config
-from fairscale.nn.model_parallel.initialize import (
-    # get_model_parallel_rank,
-    initialize_model_parallel,
-    model_parallel_is_initialized,
-)
 
-from utils import init_modules
+from lib import init_modules, get_config
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", default="cfg.yml", help="yaml config file")
@@ -38,24 +30,6 @@ parser.add_argument(
 )
 
 
-def torch_dist_init():
-    model_parallel_size = int(os.environ.get("WORLD_SIZE", 1))
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    if not torch.distributed.is_initialized():
-        if torch.cuda.is_available():
-            torch.distributed.init_process_group("nccl")
-        else:
-            torch.distributed.init_process_group("gloo")
-
-    if not model_parallel_is_initialized():
-        initialize_model_parallel(model_parallel_size)
-
-    if torch.cuda.is_available():
-        torch.cuda.set_device(local_rank)
-        if local_rank > 0:
-            sys.stdout = open(os.devnull, "w")
-
-
 def main():
     args = parser.parse_args()
     cfgyml = get_config(args.cfg)
@@ -64,7 +38,6 @@ def main():
     save_path = os.path.join(args.save_path, args.name)
     os.makedirs(save_path, exist_ok=True)
 
-    # torch_dist_init()
     devices = int(os.environ.get("WORLD_SIZE", 1))
 
     torch.set_float32_matmul_precision("high")

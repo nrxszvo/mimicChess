@@ -1,4 +1,4 @@
-datadir: pgn/output/filtered
+datadir: datasets/debug/filtered
 elo_params:
   predict: True
   loss: gaussian_nll
@@ -6,7 +6,7 @@ elo_params:
   warmup_var_steps: 3
   warmup_elo_steps: 3   
   weight: 1
-  edges: [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600]
+  edges: [1400, 1800, 2000, 2200, 2400, 4000]
 tc_groups: 
  180: [0,1000]
  300: [0,1000]
@@ -30,6 +30,7 @@ lr_scheduler_params:
   name: "WarmUpCosine"
   min_lr: 3.e-6
   warmup_steps: 8000
+opening_moves: 0
 batch_size: 32 
 max_steps: 10 
 val_check_steps: 10 
