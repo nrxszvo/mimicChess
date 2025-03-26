@@ -1,4 +1,4 @@
-[submodule "pgn/zstd"]
+[submodule "lib/dataset/cpp/zstd"]
 	path = lib/dataset/cpp/zstd
 	url = git@github.com:facebook/zstd.git
 [submodule "lib/pgnutils"]
