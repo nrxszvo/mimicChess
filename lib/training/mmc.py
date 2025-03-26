@@ -199,10 +199,10 @@ class MimicChessModule(L.LightningModule):
             preds = []
             for i in [0, 1]:
                 subpred = pred[:, i::2]
-                seqlen = subpred.shape[1]
+                halfseqlen = subpred.shape[1]
                 index = elo_groups[:, i, None, None, None].expand([
                     bs,
-                    seqlen,
+                    halfseqlen,
                     1,
                     npred,
                 ])
@@ -210,18 +210,12 @@ class MimicChessModule(L.LightningModule):
                 subpred = subpred.permute(0, 2, 1)
                 subpred = subpred[:, :, self.opening_moves :]
                 preds.append(subpred)
-
+            preds = torch.stack(preds, dim=3).reshape(bs, npred, seqlen)
         return preds
 
     def _get_move_loss(self, move_pred, batch):
         move_preds = self._format_move_pred(move_pred, batch)
-        loss = 0
-        for i in [0, 1]:
-            loss += F.cross_entropy(
-                move_preds[i], batch["move_target"][:, i::2], ignore_index=NOOP
-            )
-
-        return loss / 2
+        return F.cross_entropy(move_preds, batch["move_target"], ignore_index=NOOP)
 
     def _get_loss(self, move_pred, elo_pred, batch):
         elo_loss = None
@@ -345,7 +339,7 @@ class MimicChessModule(L.LightningModule):
         if elo_pred is not None:
             sprobs = None
             sgrps = None
-            if self.elo_params["loss"] == "cross_entropy":
+            if self.elo_params.loss == "cross_entropy":
                 probs = torch.softmax(elo_pred, dim=1)
                 sprobs, sgrps = torch.sort(probs, dim=1, descending=True)
                 sprobs = sprobs[:, :5]
@@ -361,7 +355,7 @@ class MimicChessModule(L.LightningModule):
             cdf_score = None
             loc_err = None
             avg_std = None
-            if self.elo_params["loss"] == "cross_entropy":
+            if self.elo_params.loss == "cross_entropy":
                 tprobs = torch.empty_like(probs)
                 adjprobs = torch.empty_like(probs)
                 for i, tgt in enumerate([wtgt, btgt]):
@@ -374,8 +368,8 @@ class MimicChessModule(L.LightningModule):
                     adjprobs[:, :, i::2] = probs[:, :, i::2] * (mask + lo + hi)
                 tprobs = tprobs.sum(dim=1)
                 adjprobs = adjprobs.sum(dim=1)
-            elif self.elo_params["loss"] in ["gaussian_nll", "mse"]:
-                mean, std = self.elo_params["whiten_params"]
+            elif self.elo_params.loss in ["gaussian_nll", "mse"]:
+                mean, std = self.elo_params.whiten_params
                 utgts = (tgts * std) + mean
 
                 npred = (tgts != NOOP).sum()
@@ -386,7 +380,7 @@ class MimicChessModule(L.LightningModule):
                 loc_err[tgts == NOOP] = 0
                 loc_err = loc_err.sum() / npred
 
-                if self.elo_params["loss"] == "gaussian_nll":
+                if self.elo_params.loss == "gaussian_nll":
                     avg_std, u_std_preds = self._get_avg_std(elo_pred, tgts)
 
                     m = Normal(elo_pred[:, 0], elo_pred[:, 1].clamp(min=1e-6))

@@ -97,9 +97,9 @@ def predict(cfgyml, datadir, cp, n_samp, constant_var):
         1,
         alt_datadir=datadir,
         n_samp=n_samp,
-        cp=cp,
         n_workers=0,
     )
+    mmc.load_state_dict(torch.load(cp))
     predictions = mmc.predict(dm)
     seqlen = dm.max_seq_len - dm.opening_moves + 1
     return predictions, seqlen
@@ -118,7 +118,7 @@ def main():
 
     datadir = cfgyml.datadir if args.datadir is None else args.datadir
     outputs, seq_len = predict(cfgyml, datadir, args.cp, args.nsamp, args.constant_var)
-    report = evaluate(outputs, seq_len, cfgyml.elo_edges)
+    report = evaluate(outputs, seq_len, cfgyml.elo_params.edges)
     print()
     for line in report:
         print(line)
