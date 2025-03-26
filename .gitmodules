@@ -1,6 +1,6 @@
 [submodule "pgn/zstd"]
-	path = pgn/cpp/zstd
+	path = dataPrep/cpp/zstd
 	url = git@github.com:facebook/zstd.git
 [submodule "pgn/py/pgnUtils"]
-	path = pgn/py/pgnUtils
+	path = dataPrep/pgnUtils
 	url = git@github.com:nrxszvo/pgnUtils.git

@@ -9,7 +9,7 @@ import time
 import wget
 from multiprocessing import Queue, Process
 
-from py.lib import timeit, DataWriter, PrintSafe, resize_mmaps
+from pgnUtils import timeit, DataWriter, PrintSafe, resize_mmaps
 
 
 def collect_existing_npy(npy_dir):
@@ -18,9 +18,7 @@ def collect_existing_npy(npy_dir):
     if os.path.exists(procfn):
         with open(procfn) as f:
             for line in f:
-                timestamp, name, ngames, nmoves, block, status = line.rstrip().split(
-                    ","
-                )
+                _, name, _, _, _, status = line.rstrip().split(",")
                 if status != "failed":
                     existing.append(name)
     return existing

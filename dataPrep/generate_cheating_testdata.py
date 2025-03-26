@@ -1,15 +1,15 @@
 import argparse
 import json
 import os
-from multiprocessing import Process, Queue
 import time
+from multiprocessing import Process, Queue
 
 import chess
 import numpy as np
+import pgnUtils.inference as inf
+from pgnUtils import PrintSafe, get_eta, mvid_to_uci, uci_to_mvid
 
-import pgn.py.lib.inference as inf
 from mmcdataset import load_data
-from pgn.py.lib import get_eta, PrintSafe, mvid_to_uci, uci_to_mvid
 
 
 def get_gain_and_cp_loss(scores, idx):
@@ -75,7 +75,7 @@ class CheatGenerator:
         if self.verbose:
             s = ""
             if idx % 2 == 0:
-                s = f"{idx//2}.".rjust(4)
+                s = f"{idx // 2}.".rjust(4)
             score = f"{score}"
             if miss:
                 score += "*"
