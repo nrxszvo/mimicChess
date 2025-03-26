@@ -62,9 +62,9 @@ if [ "$OS_TYPE" = "aarch64" ]; then
 	#gh run download 12787459535 -R pytorch/audio --name pytorch_audio__3.10_cu126_aarch64
 	#pip install $(ls *.whl)
 	#rm *.whl
-	conda env update --file=environment_aarch64.yml
+	conda env update --file=provisioning/environment_aarch64.yml
 else
-	conda env update --file=environment.yml
+	conda env update --file=provisioning/environment.yml
 fi
 cd ${HOME}
 
