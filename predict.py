@@ -4,8 +4,14 @@ import os
 import torch
 import numpy as np
 
-from config import get_config
-from utils import AccuracyStats, TargetStats, LegalGameStats, MoveStats, init_modules
+from lib import (
+    get_config,
+    AccuracyStats,
+    TargetStats,
+    LegalGameStats,
+    MoveStats,
+    init_modules,
+)
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", required=True, help="yaml config file")
@@ -43,18 +49,14 @@ def evaluate(outputs, seq_len, elo_edges):
 
     elo_loss = np.array([elo_op["loss"] for mv_op, elo_op in outputs]).mean()
     move_loss = np.array([mv_op["loss"] for mv_op, elo_op in outputs]).mean()
-    loc_err = np.array(
-        [
-            elo_op["location_error"] if "location_error" in elo_op else 0
-            for mv_op, elo_op in outputs
-        ]
-    ).mean()
-    avg_std = np.array(
-        [
-            elo_op["average_std"] if "average_std" in elo_op else 0
-            for mv_op, elo_op in outputs
-        ]
-    ).mean()
+    loc_err = np.array([
+        elo_op["location_error"] if "location_error" in elo_op else 0
+        for mv_op, elo_op in outputs
+    ]).mean()
+    avg_std = np.array([
+        elo_op["average_std"] if "average_std" in elo_op else 0
+        for mv_op, elo_op in outputs
+    ]).mean()
     for i, (move_data, elo_data) in enumerate(outputs):
         print(f"Evaluation {int(100 * i / nbatch)}% done", end="\r")
         if elo_data["sorted_groups"] is not None:
