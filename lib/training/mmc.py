@@ -1,20 +1,20 @@
-from typing import Dict, Optional
 from dataclasses import dataclass
+from typing import Dict, Optional
 
 import lightning as L
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
+from torch.distributions.normal import Normal
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearLR,
     SequentialLR,
 )
-from torch.distributions.normal import Normal
 
-from .model import ModelArgs, Transformer
 from .mmcdataset import NOOP
+from .model import ModelArgs, Transformer
 
 
 @dataclass

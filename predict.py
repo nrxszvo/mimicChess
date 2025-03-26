@@ -89,7 +89,7 @@ def evaluate(outputs, seq_len, elo_edges):
 
 def predict(cfgyml, datadir, cp, n_samp, constant_var):
     name = (os.path.splitext(os.path.basename(cp))[0],)
-    cfgyml.elo_params["constant_var"] = constant_var
+    cfgyml.elo_params.constant_var = constant_var
     mmc, dm = init_modules(
         cfgyml,
         name,
