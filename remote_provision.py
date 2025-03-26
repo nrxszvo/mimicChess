@@ -23,7 +23,7 @@ args = parser.parse_args()
 myname = f'\\"{args.myname}\\"'
 myemail = f'\\"{args.myemail}\\"'
 
-with open(args.tokenfile) as f:
+with open(args.accesstoken) as f:
     token = f'\\"{f.readline().rstrip()}\\"'
 
 scpcmd = f"scp provisioning/provision.sh {args.remote}:~; scp {args.apitoken} {args.remote}:~"
