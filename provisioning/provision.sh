@@ -32,6 +32,7 @@ if [ ! -d "${HOME}/git/mimicChess" ]; then
 	git clone "https://${GHTOKEN}@github.com/nrxszvo/mimicChess.git"
 	cd mimicChess
 	git submodule set-url -- lib/pgnutils "https://${GHTOKEN}@github.com/nrxszvo/pgnutils.git"
+	git submodule set-url -- lib/dataset/cpp/zstd "https://github.com/facebook/zstd.git"
 	git submodule update --init --recursive
 
 	if [ ! -e "datasets" ]; then
