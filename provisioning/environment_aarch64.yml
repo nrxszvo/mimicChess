@@ -4,11 +4,11 @@ dependencies:
   - conda-forge::matplotlib
   - anaconda::pyyaml
   - conda-forge::chess
-  - conda-forge::lightning
   - conda-forge::tensorboard
   - conda-forge::chess
   - conda-forge::python-wget
   - anaconda::pip
   - pip:
+      - lightning
       - fairscale
 

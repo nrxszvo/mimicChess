@@ -97,7 +97,6 @@ def predict(cfgyml, datadir, cp, n_samp, constant_var):
         1,
         alt_datadir=datadir,
         n_samp=n_samp,
-        n_workers=0,
     )
     mmc.load_state_dict(torch.load(cp))
     predictions = mmc.predict(dm)
