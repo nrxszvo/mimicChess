@@ -16,9 +16,9 @@ To learn more about how mimicChess was built and to watch it in action, visit th
 
 This repository contains the following:
 
-- **A) A highly parallelized python script to download and process the entire Lichess database**
-- **B) Pytorch code to train mimicChess on the resulting dataset**
-- **C) Provisioning scripts for the cloud GPU machines used for training**
+- **A highly parallelized python script to download and process the entire Lichess database**
+- **Pytorch code to train mimicChess on the resulting dataset**
+- **Provisioning scripts for the cloud GPU machines used for training**
 
 ---
 
