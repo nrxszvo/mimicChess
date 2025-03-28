@@ -1,6 +1,6 @@
 # mimicChess
 
-## A Neural Network Chess Bot Trained in the Style of an LLM to Predict Human-like Chess Moves
+## A Neural Network Chess Engine Trained in the Style of an LLM to Predict Human-like Chess Moves
 
 **mimicChess** is built with [Pytorch Lightning](https://lightning.ai) and utilizes the [Lichess database](https://database.lichess.org) to train a **transformer neural network** with approximately **1 billion parameters** on over **100 million chess games** between human opponents.
 
@@ -16,8 +16,8 @@ To learn more about how mimicChess was built and to watch it in action, visit th
 
 This repository contains the following:
 
-- **A) Download and process the Lichess database**
-- **B) Train mimicChess on the resulting dataset using Pytorch**
+- **A) A highly parallelized python script to download and process the Lichess database**
+- **B) Pytorch code to train mimicChess on the resulting dataset**
 
 ---
 
