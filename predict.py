@@ -13,7 +13,8 @@ from lib import (
     init_modules,
 )
 
-parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", required=True, help="yaml config file")
 parser.add_argument("--cp", required=True, help="checkpoint file")
 parser.add_argument(
@@ -47,39 +48,25 @@ def evaluate(outputs, seq_len, elo_edges):
     game_stats = LegalGameStats()
     move_stats = MoveStats()
 
-    elo_loss = np.array([elo_op["loss"] for mv_op, elo_op in outputs]).mean()
-    move_loss = np.array([mv_op["loss"] for mv_op, elo_op in outputs]).mean()
+    elo_loss = np.array([elo_op["loss"] for _, elo_op in outputs]).mean()
+    move_loss = np.array([mv_op["loss"] for mv_op, _ in outputs]).mean()
     loc_err = np.array([
         elo_op["location_error"] if "location_error" in elo_op else 0
-        for mv_op, elo_op in outputs
+        for _, elo_op in outputs
     ]).mean()
     avg_std = np.array([
         elo_op["average_std"] if "average_std" in elo_op else 0
-        for mv_op, elo_op in outputs
+        for _, elo_op in outputs
     ]).mean()
     for i, (move_data, elo_data) in enumerate(outputs):
         print(f"Evaluation {int(100 * i / nbatch)}% done", end="\r")
-        if elo_data["sorted_groups"] is not None:
-            acc_stats.eval(
-                elo_data["sorted_groups"],
-                elo_data["sorted_probs"],
-                elo_data["target_groups"],
-            )
-        tstats.eval(
-            elo_data["target_probs"],
-            elo_data["adjacent_probs"],
-            elo_data["target_groups"],
-            elo_data["cdf_score"],
-        )
         game_stats.eval(
             move_data["sorted_tokens"], move_data["openings"], move_data["targets"]
         )
         move_stats.eval(move_data["sorted_tokens"], move_data["targets"])
 
     report = (
-        acc_stats.report()
-        + tstats.report()
-        + game_stats.report()
+        game_stats.report()
         + move_stats.report()
         + [f"Location error: {loc_err:.1f}", f"Average std: {avg_std:.1f}"]
         + [f"Elo loss: {elo_loss:.2f}", f"Move loss: {move_loss:.2f}"]
@@ -116,7 +103,8 @@ def main():
         cfgyml.batch_size = args.bs
 
     datadir = cfgyml.datadir if args.datadir is None else args.datadir
-    outputs, seq_len = predict(cfgyml, datadir, args.cp, args.nsamp, args.constant_var)
+    outputs, seq_len = predict(
+        cfgyml, datadir, args.cp, args.nsamp, args.constant_var)
     report = evaluate(outputs, seq_len, cfgyml.elo_params.edges)
     print()
     for line in report:

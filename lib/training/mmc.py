@@ -1,12 +1,11 @@
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 import lightning as L
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
-from torch.distributions.normal import Normal
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearLR,
@@ -21,10 +20,10 @@ from .model import ModelArgs, Transformer
 class MMCModuleArgs:
     name: str
     outdir: str
-    elo_params: Dict
+    elo_params: Any
     model_args: ModelArgs
     opening_moves: int
-    lr_scheduler_params: Dict
+    lr_scheduler_params: Any
     max_steps: int
     val_check_steps: int
     random_seed: Optional[int]
@@ -130,6 +129,9 @@ class MimicChessModule(L.LightningModule):
                 milestones=[warmup_steps],
             )
             freq = 1
+        else:
+            raise Exception(f'unsupported scheduler: {name}')
+
         config = {
             "scheduler": scheduler,
             "frequency": freq,
@@ -159,16 +161,18 @@ class MimicChessModule(L.LightningModule):
     def _format_elo_pred(self, pred, batch):
         if self.params.model_args.n_timecontrol_heads > 0:
             tc_groups = batch["tc_groups"]
-            bs, seqlen, ntc, ndim = pred.shape
-            index = tc_groups[:, None, None, None].expand([bs, seqlen, 1, ndim])
+            bs, seqlen, _, ndim = pred.shape
+            index = tc_groups[:, None, None, None].expand(
+                [bs, seqlen, 1, ndim])
             pred = torch.gather(pred, 2, index).squeeze(2)
             pred = pred.permute(0, 2, 1)
-        return pred[:, :, self.opening_moves :]
+        return pred[:, :, self.opening_moves:]
 
     def _get_elo_loss(self, elo_pred, batch):
         elo_pred = self._format_elo_pred(elo_pred, batch)
         if self.elo_params.loss == "cross_entropy":
-            loss = F.cross_entropy(elo_pred, batch["elo_target"], ignore_index=NOOP)
+            loss = F.cross_entropy(
+                elo_pred, batch["elo_target"], ignore_index=NOOP)
         elif self.elo_params.loss == "gaussian_nll":
             exp = elo_pred[:, 0]
             var = elo_pred[:, 1]
@@ -179,38 +183,50 @@ class MimicChessModule(L.LightningModule):
             loss = F.gaussian_nll_loss(exp, batch["elo_target"], var)
         elif self.elo_params.loss == "mse":
             loss = F.mse_loss(elo_pred.squeeze(1), batch["elo_target"])
+        else:
+            raise Exception(f'unsupported Elo loss: {self.elo_params.loss}')
 
         return loss, elo_pred
 
     def _format_move_pred(self, pred, batch):
-        if self.params.model_args.n_timecontrol_heads > 0:
-            tc_groups = batch["tc_groups"]
-            elo_groups = batch["elo_groups"]
-            bs, seqlen, ntc, nelo, npred = pred.shape
-            index = tc_groups[:, None, None, None, None].expand([
+        tc_groups = batch["tc_groups"]
+        elo_groups = batch["elo_groups"]
+        bs, seqlen, _, nelo, npred = pred.shape
+        index = tc_groups[:, None, None, None, None].expand([
+            bs,
+            seqlen,
+            1,
+            nelo,
+            npred,
+        ])
+        pred = torch.gather(pred, 2, index).squeeze(2)
+
+        preds = []
+        for i in [0, 1]:
+            subpred = pred[:, i::2]
+            halfseqlen = subpred.shape[1]
+            index = elo_groups[:, i, None, None, None].expand([
                 bs,
-                seqlen,
+                halfseqlen,
                 1,
-                nelo,
                 npred,
             ])
-            pred = torch.gather(pred, 2, index).squeeze(2)
+            subpred = torch.gather(subpred, 2, index).squeeze(2)
+            subpred = subpred.permute(0, 2, 1)
+            subpred = subpred[:, :, self.opening_moves:]
+            preds.append(subpred)
+        padded = False
+        if preds[1].shape[2] == preds[0].shape[2]-1:
+            padded = True
+            seqlen += 1
+            preds[1] = torch.cat(
+                [preds[1], torch.zeros_like(preds[1][:, :, 0:1])], dim=2)
 
-            preds = []
-            for i in [0, 1]:
-                subpred = pred[:, i::2]
-                halfseqlen = subpred.shape[1]
-                index = elo_groups[:, i, None, None, None].expand([
-                    bs,
-                    halfseqlen,
-                    1,
-                    npred,
-                ])
-                subpred = torch.gather(subpred, 2, index).squeeze(2)
-                subpred = subpred.permute(0, 2, 1)
-                subpred = subpred[:, :, self.opening_moves :]
-                preds.append(subpred)
-            preds = torch.stack(preds, dim=3).reshape(bs, npred, seqlen)
+        preds = torch.stack(preds, dim=3).reshape(bs, npred, seqlen)
+
+        if padded:
+            preds = preds[:, :, :-1]
+
         return preds
 
     def _get_move_loss(self, move_pred, batch):
@@ -218,13 +234,10 @@ class MimicChessModule(L.LightningModule):
         return F.cross_entropy(move_preds, batch["move_target"], ignore_index=NOOP)
 
     def _get_loss(self, move_pred, elo_pred, batch):
+        move_loss = self._get_move_loss(move_pred, batch)
+        loss = move_loss
         elo_loss = None
-        move_loss = None
-        loss = 0
-        if move_pred is not None:
-            move_loss = self._get_move_loss(move_pred, batch)
-            loss += move_loss
-        if elo_pred is not None and self._get_elo_warmup_stage() != "WARMUP_ELO":
+        if self._get_elo_warmup_stage() != "WARMUP_ELO":
             elo_loss, elo_pred = self._get_elo_loss(elo_pred, batch)
             loss += self.elo_params.weight * elo_loss
 
@@ -232,7 +245,8 @@ class MimicChessModule(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
-        loss, move_loss, elo_loss, elo_pred = self._get_loss(move_pred, elo_pred, batch)
+        loss, move_loss, elo_loss, elo_pred = self._get_loss(
+            move_pred, elo_pred, batch)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         if move_loss is not None:
             self.log("train_move_loss", move_loss, sync_dist=True)
@@ -277,26 +291,8 @@ class MimicChessModule(L.LightningModule):
             )
         return valid_loss
 
-    def sample_top_n(self, probs, n):
-        probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
-        return probs_idx[:, :, :n], probs_sort[:, :, :n]
-
-    def sample_top_p(self, probs, p, tgt):
-        probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
-        probs_sum = torch.cumsum(probs_sort, dim=-1)
-        mask = probs_sum - probs_sort > p
-        probs_sort[mask] = 0.0
-        probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
-        bs, seqlen, nclass = probs_sort.shape
-        next_token = torch.multinomial(
-            probs_sort.reshape(-1, nclass), num_samples=1
-        ).reshape(bs, seqlen, 1)
-        next_token = torch.gather(probs_idx, -1, next_token)
-        next_token[tgt == NOOP] = NOOP
-        return next_token
-
     def _get_avg_std(self, elo_pred, tgts):
-        mean, std = self.elo_params.whiten_params
+        _, std = self.elo_params.whiten_params
         npred = (tgts != NOOP).sum()
         u_std_preds = (elo_pred[:, 1] ** 0.5) * std
         u_std_preds[tgts == NOOP] = 0
@@ -305,7 +301,9 @@ class MimicChessModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
-        loss, move_loss, elo_loss, elo_pred = self._get_loss(move_pred, elo_pred, batch)
+        _, move_loss, elo_loss, elo_pred = self._get_loss(
+            move_pred, elo_pred, batch)
+        move_pred = self._format_move_pred(move_pred, batch)
 
         def to_numpy(torchd):
             npd = {}
@@ -315,9 +313,7 @@ class MimicChessModule(L.LightningModule):
                 npd[k] = v
             return npd
 
-        move_data = elo_data = None
-        if move_pred is not None:
-            move_pred = self._format_move_pred(move_pred, batch)
+        def get_move_data():
             probs = torch.softmax(move_pred, dim=1)
             sprobs, smoves = torch.sort(probs, dim=1, descending=True)
             sprobs = sprobs[:, :5]
@@ -327,7 +323,7 @@ class MimicChessModule(L.LightningModule):
             mask = F.one_hot(tgts, probs.shape[1]).permute(0, 2, 1)
             tprobs = (probs * mask).sum(dim=1)
 
-            move_data = to_numpy({
+            return to_numpy({
                 "sorted_tokens": smoves,
                 "sorted_probs": sprobs,
                 "target_probs": tprobs,
@@ -336,62 +332,22 @@ class MimicChessModule(L.LightningModule):
                 "loss": move_loss.item(),
             })
 
-        if elo_pred is not None:
-            sprobs = None
-            sgrps = None
-            if self.elo_params.loss == "cross_entropy":
-                probs = torch.softmax(elo_pred, dim=1)
-                sprobs, sgrps = torch.sort(probs, dim=1, descending=True)
-                sprobs = sprobs[:, :5]
-                sgrps = sgrps[:, :5]
-
+        def get_elo_data():
             tgts = batch["elo_target"]
-            wtgt = tgts[:, 0]
-            btgt = tgts[:, 1]
-            _, nclass, _ = probs.shape
+            mean, std = self.elo_params.whiten_params
+            utgts = (tgts * std) + mean
 
-            tprobs = None
-            adjprobs = None
-            cdf_score = None
-            loc_err = None
-            avg_std = None
-            if self.elo_params.loss == "cross_entropy":
-                tprobs = torch.empty_like(probs)
-                adjprobs = torch.empty_like(probs)
-                for i, tgt in enumerate([wtgt, btgt]):
-                    mask = F.one_hot(tgt, nclass).unsqueeze(-1)
-                    lo = F.one_hot(torch.clamp(tgt - 1, min=0), nclass).unsqueeze(-1)
-                    hi = F.one_hot(
-                        torch.clamp(tgt + 1, max=nclass - 1), nclass
-                    ).unsqueeze(-1)
-                    tprobs[:, :, i::2] = probs[:, :, i::2] * mask
-                    adjprobs[:, :, i::2] = probs[:, :, i::2] * (mask + lo + hi)
-                tprobs = tprobs.sum(dim=1)
-                adjprobs = adjprobs.sum(dim=1)
-            elif self.elo_params.loss in ["gaussian_nll", "mse"]:
-                mean, std = self.elo_params.whiten_params
-                utgts = (tgts * std) + mean
+            npred = (tgts != NOOP).sum()
 
-                npred = (tgts != NOOP).sum()
+            u_loc_preds = (elo_pred[:, 0] * std) + mean
+            u_loc_preds[tgts == NOOP] = 0
+            loc_err = (utgts - u_loc_preds).abs()
+            loc_err[tgts == NOOP] = 0
+            loc_err = loc_err.sum() / npred
 
-                u_loc_preds = (elo_pred[:, 0] * std) + mean
-                u_loc_preds[tgts == NOOP] = 0
-                loc_err = (utgts - u_loc_preds).abs()
-                loc_err[tgts == NOOP] = 0
-                loc_err = loc_err.sum() / npred
+            avg_std, u_std_preds = self._get_avg_std(elo_pred, tgts)
 
-                if self.elo_params.loss == "gaussian_nll":
-                    avg_std, u_std_preds = self._get_avg_std(elo_pred, tgts)
-
-                    m = Normal(elo_pred[:, 0], elo_pred[:, 1].clamp(min=1e-6))
-                    cdf_score = 1 - 2 * (m.cdf(tgts) - 0.5).abs()
-
-            elo_data = to_numpy({
-                "sorted_probs": sprobs,
-                "sorted_groups": sgrps,
-                "target_probs": tprobs,
-                "adjacent_probs": adjprobs,
-                "cdf_score": cdf_score,
+            return to_numpy({
                 "target_groups": tgts,
                 "loss": elo_loss.item(),
                 "location_error": loc_err,
@@ -400,7 +356,7 @@ class MimicChessModule(L.LightningModule):
                 "elo_std": u_std_preds,
             })
 
-        return move_data, elo_data
+        return get_move_data(), get_elo_data()
 
     def fit(self, datamodule, ckpt=None):
         self.trainer.fit(self, datamodule=datamodule, ckpt_path=ckpt)
