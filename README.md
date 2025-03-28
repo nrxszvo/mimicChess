@@ -18,7 +18,7 @@ This repository contains the following:
 
 - **A) A highly parallelized python script to download and process the entire Lichess database**
 - **B) Pytorch code to train mimicChess on the resulting dataset**
-- **C) Provisioning scripts for the cloud GPU machines used for training 
+- **C) Provisioning scripts for the cloud GPU machines used for training**
 
 ---
 
