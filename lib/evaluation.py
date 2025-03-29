@@ -12,6 +12,7 @@ SINGLE_THREAD = False
 
 
 class LegalGameStats:
+    @staticmethod
     def eval_game(gameq, resultq):
         while True:
             pred, opn, tgt = gameq.get()
