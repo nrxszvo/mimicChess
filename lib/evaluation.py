@@ -1,5 +1,6 @@
 import os
 from functools import partial
+from collections import Counter
 
 import numpy as np
 from multiprocessing import Queue, Process
@@ -9,43 +10,59 @@ from .pgnutils.reconstruct import count_invalid
 
 
 class LegalGameStats:
-    def eval_game(gameq, resultsq):
+    def eval_game(gameq, resultq):
         while True:
             pred, opn, tgt = gameq.get()
             if pred is None:
                 break
-            nmoves, nfail = count_invalid(pred[0], opn, tgt)
+            nmoves, nfail, reasons = count_invalid(pred[0], opn, tgt)
             nvalid_moves = nmoves - nfail
-            resultsq.put((nvalid_moves, nmoves, nfail == 0))
+            resultq.put((nvalid_moves, nmoves, nfail == 0, reasons))
 
-    def __init__(self, nproc=os.cpu_count() - 1):
+    def __init__(self, nproc=os.cpu_count()-1):
         self.nvalid_games = 0
         self.ntotal_games = 0
         self.nvalid_moves = 0
         self.ntotal_moves = 0
+        self.reasons = Counter()
         self.gameq = Queue()
         self.resultq = Queue()
         self.procs = []
+        '''
         for _ in range(nproc):
             p = Process(
-                target=LegalGameStats.eval_game, args=(self.gameq, self.resultq)
+                target=LegalGameStats.eval_game, args=(
+                    self.gameq, self.resultq)
             )
             p.daemon = True
             p.start()
             self.procs.append(p)
+        '''
 
     def eval(self, tokens, opening, tgts):
         self.ntotal_games += tokens.shape[0]
         ngames = len(tokens)
         for game in zip(tokens, opening, tgts):
-            self.gameq.put(game)
+            # self.gameq.put(game)
+            pred, opn, tgt = game
+            nmoves, nfail, reasons = count_invalid(pred[0], opn, tgt)
+            nvalid_moves = nmoves - nfail
+            self.nvalid_moves += nvalid_moves
+            if nfail == 0:
+                self.nvalid_games += 1
+            else:
+                self.reasons.update(reasons)
 
+        '''
         for _ in range(ngames):
-            nvalid_moves, nmoves, is_valid_game = self.resultq.get()
+            nvalid_moves, nmoves, is_valid_game, reasons = self.resultq.get()
             self.nvalid_moves += nvalid_moves
             self.ntotal_moves += nmoves
             if is_valid_game:
                 self.nvalid_games += 1
+            else:
+                self.reasons.update(reasons)
+        '''
 
     def __del__(self):
         for _ in range(len(self.procs)):
@@ -61,6 +78,9 @@ class LegalGameStats:
         lines.append(
             f"Legal move frequency: {100 * self.nvalid_moves / self.ntotal_moves:.3f}%"
         )
+        for reason, count in self.reasons.items():
+            lines.append(f'illegal {reason} moves: {count}')
+
         return lines
 
 
