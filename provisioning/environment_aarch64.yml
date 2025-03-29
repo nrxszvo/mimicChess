@@ -9,6 +9,7 @@ dependencies:
   - conda-forge::python-wget
   - anaconda::pip
   - pip:
+      - autopep8
       - lightning
       - fairscale
 

@@ -8,6 +8,8 @@ from multiprocessing import Queue, Process
 from .training.mmcdataset import NOOP
 from .pgnutils.reconstruct import count_invalid
 
+SINGLE_THREAD = False
+
 
 class LegalGameStats:
     def eval_game(gameq, resultq):
@@ -28,41 +30,42 @@ class LegalGameStats:
         self.gameq = Queue()
         self.resultq = Queue()
         self.procs = []
-        '''
-        for _ in range(nproc):
-            p = Process(
-                target=LegalGameStats.eval_game, args=(
-                    self.gameq, self.resultq)
-            )
-            p.daemon = True
-            p.start()
-            self.procs.append(p)
-        '''
+        if not SINGLE_THREAD:
+            for _ in range(nproc):
+                p = Process(
+                    target=LegalGameStats.eval_game, args=(
+                        self.gameq, self.resultq)
+                )
+                p.daemon = True
+                p.start()
+                self.procs.append(p)
 
     def eval(self, tokens, opening, tgts):
         self.ntotal_games += tokens.shape[0]
         ngames = len(tokens)
         for game in zip(tokens, opening, tgts):
-            # self.gameq.put(game)
-            pred, opn, tgt = game
-            nmoves, nfail, reasons = count_invalid(pred[0], opn, tgt)
-            nvalid_moves = nmoves - nfail
-            self.nvalid_moves += nvalid_moves
-            if nfail == 0:
-                self.nvalid_games += 1
+            if SINGLE_THREAD:
+                pred, opn, tgt = game
+                nmoves, nfail, reasons = count_invalid(pred[0], opn, tgt)
+                nvalid_moves = nmoves - nfail
+                self.nvalid_moves += nvalid_moves
+                self.ntotal_moves += nmoves
+                if nfail == 0:
+                    self.nvalid_games += 1
+                else:
+                    self.reasons.update(reasons)
             else:
-                self.reasons.update(reasons)
+                self.gameq.put(game)
 
-        '''
-        for _ in range(ngames):
-            nvalid_moves, nmoves, is_valid_game, reasons = self.resultq.get()
-            self.nvalid_moves += nvalid_moves
-            self.ntotal_moves += nmoves
-            if is_valid_game:
-                self.nvalid_games += 1
-            else:
-                self.reasons.update(reasons)
-        '''
+        if not SINGLE_THREAD:
+            for _ in range(ngames):
+                nvalid_moves, nmoves, is_valid_game, reasons = self.resultq.get()
+                self.nvalid_moves += nvalid_moves
+                self.ntotal_moves += nmoves
+                if is_valid_game:
+                    self.nvalid_games += 1
+                else:
+                    self.reasons.update(reasons)
 
     def __del__(self):
         for _ in range(len(self.procs)):
