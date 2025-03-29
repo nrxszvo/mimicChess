@@ -30,6 +30,8 @@ ABSL_FLAG(std::vector<std::string>, eloEdges, std::vector<std::string>({"1000","
 ABSL_FLAG(int, maxGamesPerElo, -1, "maximum number of games per ELO group (-1 to disable)");
 ABSL_FLAG(int, nThreadsPerBlock, 1, "number of threads per block");
 ABSL_FLAG(int, maxGamesLeniency, 100, "allow maxGamesPerElo to be exceeded by approx. this number in order to greatly speed up parallel processing");
+ABSL_FLAG(int, minTimeCtl, 3*60, "minimum clock base in seconds");
+ABSL_FLAG(int, maxTimeCtl, 3*60*60, "maximum clock base in seconds");
 
 typedef std::map<int16_t, std::map<int16_t, int64_t>> tcHistType;
 
@@ -186,6 +188,8 @@ class BlockProcessor {
 	float minTimeP;
 	int maxGames;
 	int leniency;
+	int minTimeCtl;
+	int maxTimeCtl;
 	std::vector<int> eloEdges;
 	std::vector<std::vector<int>> eloHist;
 	tcHistType tcHist;
@@ -198,6 +202,8 @@ public:
 		int nBlocks;
 		int nThreadsPerBlock;
 		int minMoves;
+		int minTimeCtl;
+		int maxTimeCtl;
 		float minTimeP;
 		int maxGames;
 		int maxGamesLeniency;
@@ -205,7 +211,7 @@ public:
 		std::shared_ptr<SplitManager> splitMgr;
 	};
 	BlockProcessor(Args& args)
-		: minMoves(args.minMoves), minTimeP(args.minTimeP), maxGames(args.maxGames), leniency(args.maxGamesLeniency), eloEdges(args.eloEdges), splitMgr(args.splitMgr) 
+		: minMoves(args.minMoves), minTimeP(args.minTimeP), maxGames(args.maxGames), leniency(args.maxGamesLeniency), eloEdges(args.eloEdges), splitMgr(args.splitMgr), minTimeCtl(args.minTimeCtl), maxTimeCtl(args.maxTimeCtl)
 	{
 		eloHist = std::vector(eloEdges.size(), std::vector(eloEdges.size(), 0));
 		blockGames = std::vector<int64_t>(args.nBlocks*std::max(1, args.nThreadsPerBlock), 0);
@@ -264,6 +270,8 @@ public:
 
 			blockGames[threadId]++;
 
+			if (md->timeCtl < minTimeCtl || md->timeCtl > maxTimeCtl) continue;
+
 			int wbin = getEloBin(md->welo, eloEdges);
 			int bbin = getEloBin(md->belo, eloEdges);
 			if (maxGames > 0 && eloHist[wbin][bbin] >= maxGames) continue;
@@ -308,6 +316,8 @@ struct FDArgs {
 	std::vector<int> eloEdges;
 	int maxGames;
 	int maxGamesLeniency;
+	int minTimeCtl;
+	int maxTimeCtl;
 };
 
 std::vector<int64_t> getGamesPerThread(std::vector<std::string>& npydirs, int nThreadsPerBlock) {
@@ -342,6 +352,8 @@ std::shared_ptr<BlockProcessor> initBlockProcessor(FDArgs &args, std::shared_ptr
 	bpArgs.maxGames = args.maxGames;
 	bpArgs.maxGamesLeniency = args.maxGamesLeniency;
 	bpArgs.eloEdges = args.eloEdges;
+	bpArgs.minTimeCtl = args.minTimeCtl;
+	bpArgs.maxTimeCtl = args.maxTimeCtl;
 	return std::make_shared<BlockProcessor>(bpArgs);
 }
 
@@ -454,7 +466,8 @@ int main(int argc, char *argv[]) {
 	args.testp = absl::GetFlag(FLAGS_testp);
 	args.maxGames = absl::GetFlag(FLAGS_maxGamesPerElo);
 	args.maxGamesLeniency = absl::GetFlag(FLAGS_maxGamesLeniency);
-
+	args.minTimeCtl = absl::GetFlag(FLAGS_minTimeCtl);
+	args.maxTimeCtl = absl::GetFlag(FLAGS_maxTimeCtl);
 	filterData(args);
 
 	return 0;
