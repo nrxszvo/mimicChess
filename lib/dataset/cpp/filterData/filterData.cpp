@@ -55,10 +55,11 @@ public:
 struct Split {
 	int64_t nSamp;
 	int64_t nGames;
+	int64_t nMoves;
 	std::string fp;
 	std::ofstream idxData;
 	std::string name;
-	Split(std::string name, std::string outdir): name(name), nSamp(0), nGames(0), fp(outdir + "/" + name + ".npy") {
+	Split(std::string name, std::string outdir): name(name), nSamp(0), nGames(0), nMoves(0), fp(outdir + "/" + name + ".npy") {
 	   	idxData = std::ofstream(fp, std::ios::binary);
 	}
 };
@@ -98,7 +99,18 @@ public:
 		int64_t buf[] = {md->gameIdx, md->gameStart, gameLength, blockId};
 		splits[threadId][dsIdx].idxData.write(reinterpret_cast<char*>(buf), sizeof(buf));
 		splits[threadId][dsIdx].nGames++;
+		splits[threadId][dsIdx].nMoves += gameLength;
 	};
+
+	int64_t getNMoves() {
+		int64_t nMoves = 0;
+		for (auto& ttv: splits) {
+			for (auto& split: ttv) {
+				nMoves += split.nMoves;
+			}
+		}
+		return nMoves;
+	}
 
 	int64_t getNGames() {
 		int64_t nGames = 0;
@@ -113,9 +125,11 @@ public:
 	int16_t getMaxElo() {
 		return maxElo;
 	}
-	void finalizeData(std::vector<std::string>& blockDirs, tcHistType& tcHist) {
+
+	void finalizeData(std::vector<std::string>& blockDirs, tcHistType& tcHist, std::vector<std::vector<int>>& eloHist, std::vector<int>& eloEdges) {
 		json md;
 		md["ngames"] = getNGames();
+		md["nMoves"] = getNMoves();
 		md["min_moves"] = minMoves;
 		md["block_dirs"] = blockDirs;	
 		md["tc_histo"] = json::object_t();
@@ -126,13 +140,24 @@ public:
 				md["tc_histo"][tc][std::to_string(incn.first)] = incn.second;
 			}
 		}
+		md["elo_histo"] = json::object_t();
+		for (int i=0; i < eloEdges.size(); i++) {
+			std::string wbin = std::to_string(eloEdges[i]);
+			md["elo_histo"][wbin] = json::object_t();
+			for (int j=0; j<eloEdges.size(); j++) {
+				std::string bbin = std::to_string(eloEdges[j]);
+				md["elo_histo"][wbin][bbin] = eloHist[i][j];
+			}
+		}
 		std::cout << std::endl << "Consolidating output data..." << std::endl;
 		for (int i=0; i<splits[0].size(); i++) {
 			int64_t nGames = 0;
+			int64_t nMoves = 0;
 			std::ofstream consOf = std::ofstream(outdir + "/" + names[i] + ".npy", std::ios::binary);
 			for (int threadId=0; threadId < splits.size(); threadId++) {
 				Split& split = splits[threadId][i];
 				nGames += split.nGames;
+				nMoves += split.nMoves;
 				split.idxData.close();
 				std::ifstream thrIf = std::ifstream(split.fp, std::ios::binary);
 				consOf << thrIf.rdbuf();
@@ -141,7 +166,8 @@ public:
 			}
 			consOf.close();
 			md[names[i] + "_shape"] = {nGames,4};
-			md[names[i] + "_n"] = nGames;
+			md[names[i] + "_games"] = nGames;
+			md[names[i] + "_moves"] = nMoves;
 		}
 		std::ofstream mdfile(outdir + "/fmd.json");
 		mdfile << md << std::endl;
@@ -164,6 +190,7 @@ void printReport(int64_t nInc, int64_t nTotal, std::vector<int>& eloEdges, std::
 		std::cout << std::setfill(' ') << std::setw(11) << e;
 	}
 	std::cout << std::endl << std::endl;
+	/*
 	std::cout << "Time Control Histogram:" << std::endl;
 	for (auto tcinc: tcHist) {
 		std::cout << std::setfill(' ') << std::setw(11) << tcinc.first << std::endl;
@@ -172,6 +199,7 @@ void printReport(int64_t nInc, int64_t nTotal, std::vector<int>& eloEdges, std::
 		}
 	}
 	std::cout << std::endl;
+	*/
 }
 
 auto getEloBin(int elo, std::vector<int>& eloEdges) {
@@ -414,7 +442,7 @@ void filterData(FDArgs& args) {
 	} else {
 		runMultiThreaded(blkProc, args);
 	}
-	splitMgr->finalizeData(args.npydirs, blkProc->getTCHist());
+	splitMgr->finalizeData(args.npydirs, blkProc->getTCHist(), blkProc->getEloHist(), args.eloEdges);
 	printReport(splitMgr->getNGames(), blkProc->completedGames(), args.eloEdges, blkProc->getEloHist(), blkProc->getTCHist(), splitMgr->getMaxElo()); 
 
 	auto stop = hrc::now();	
