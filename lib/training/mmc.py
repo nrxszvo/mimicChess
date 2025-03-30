@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Optional, Any
+from typing import Optional, Any
 
 import lightning as L
 import torch
@@ -130,7 +130,7 @@ class MimicChessModule(L.LightningModule):
             )
             freq = 1
         else:
-            raise Exception(f'unsupported scheduler: {name}')
+            raise Exception(f"unsupported scheduler: {name}")
 
         config = {
             "scheduler": scheduler,
@@ -159,20 +159,21 @@ class MimicChessModule(L.LightningModule):
                 return "COMPLETE"
 
     def _format_elo_pred(self, pred, batch):
-        if self.params.model_args.n_timecontrol_heads > 0:
+        if self.params.model_args.n_timecontrol_heads == 1:
+            pred = pred[:, :, 0]
+        else:
             tc_groups = batch["tc_groups"]
             bs, seqlen, _, ndim = pred.shape
-            index = tc_groups[:, None, None, None].expand(
-                [bs, seqlen, 1, ndim])
+            index = tc_groups[:, None, None, None].expand([bs, seqlen, 1, ndim])
             pred = torch.gather(pred, 2, index).squeeze(2)
-            pred = pred.permute(0, 2, 1)
-        return pred[:, :, self.opening_moves:]
+
+        pred = pred.permute(0, 2, 1)
+        return pred[:, :, self.opening_moves :]
 
     def _get_elo_loss(self, elo_pred, batch):
         elo_pred = self._format_elo_pred(elo_pred, batch)
         if self.elo_params.loss == "cross_entropy":
-            loss = F.cross_entropy(
-                elo_pred, batch["elo_target"], ignore_index=NOOP)
+            loss = F.cross_entropy(elo_pred, batch["elo_target"], ignore_index=NOOP)
         elif self.elo_params.loss == "gaussian_nll":
             exp = elo_pred[:, 0]
             var = elo_pred[:, 1]
@@ -184,48 +185,55 @@ class MimicChessModule(L.LightningModule):
         elif self.elo_params.loss == "mse":
             loss = F.mse_loss(elo_pred.squeeze(1), batch["elo_target"])
         else:
-            raise Exception(f'unsupported Elo loss: {self.elo_params.loss}')
+            raise Exception(f"unsupported Elo loss: {self.elo_params.loss}")
 
         return loss, elo_pred
 
     def _format_move_pred(self, pred, batch):
-        tc_groups = batch["tc_groups"]
-        elo_groups = batch["elo_groups"]
         bs, seqlen, _, nelo, npred = pred.shape
-        index = tc_groups[:, None, None, None, None].expand([
-            bs,
-            seqlen,
-            1,
-            nelo,
-            npred,
-        ])
-        pred = torch.gather(pred, 2, index).squeeze(2)
-
-        preds = []
-        for i in [0, 1]:
-            subpred = pred[:, i::2]
-            halfseqlen = subpred.shape[1]
-            index = elo_groups[:, i, None, None, None].expand([
+        if self.params.model_args.n_timecontrol_heads == 1:
+            pred = pred[:, :, 0]
+        else:
+            tc_groups = batch["tc_groups"]
+            index = tc_groups[:, None, None, None, None].expand([
                 bs,
-                halfseqlen,
+                seqlen,
                 1,
+                nelo,
                 npred,
             ])
-            subpred = torch.gather(subpred, 2, index).squeeze(2)
-            subpred = subpred.permute(0, 2, 1)
-            subpred = subpred[:, :, self.opening_moves:]
-            preds.append(subpred)
-        padded = False
-        if preds[1].shape[2] == preds[0].shape[2]-1:
-            padded = True
-            seqlen += 1
-            preds[1] = torch.cat(
-                [preds[1], torch.zeros_like(preds[1][:, :, 0:1])], dim=2)
+            pred = torch.gather(pred, 2, index).squeeze(2)
 
-        preds = torch.stack(preds, dim=3).reshape(bs, npred, seqlen)
+        if self.params.model_args.n_elo_heads == 1:
+            preds = pred[:, :, 0].permute(0, 2, 1)
+        else:
+            preds = []
+            elo_groups = batch["elo_groups"]
+            for i in [0, 1]:
+                subpred = pred[:, i::2]
+                halfseqlen = subpred.shape[1]
+                index = elo_groups[:, i, None, None, None].expand([
+                    bs,
+                    halfseqlen,
+                    1,
+                    npred,
+                ])
+                subpred = torch.gather(subpred, 2, index).squeeze(2)
+                subpred = subpred.permute(0, 2, 1)
+                subpred = subpred[:, :, self.opening_moves :]
+                preds.append(subpred)
+            padded = False
+            if preds[1].shape[2] == preds[0].shape[2] - 1:
+                padded = True
+                seqlen += 1
+                preds[1] = torch.cat(
+                    [preds[1], torch.zeros_like(preds[1][:, :, 0:1])], dim=2
+                )
 
-        if padded:
-            preds = preds[:, :, :-1]
+            preds = torch.stack(preds, dim=3).reshape(bs, npred, seqlen)
+
+            if padded:
+                preds = preds[:, :, :-1]
 
         return preds
 
@@ -245,8 +253,7 @@ class MimicChessModule(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
-        loss, move_loss, elo_loss, elo_pred = self._get_loss(
-            move_pred, elo_pred, batch)
+        loss, move_loss, elo_loss, elo_pred = self._get_loss(move_pred, elo_pred, batch)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         if move_loss is not None:
             self.log("train_move_loss", move_loss, sync_dist=True)
@@ -301,8 +308,7 @@ class MimicChessModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
-        _, move_loss, elo_loss, elo_pred = self._get_loss(
-            move_pred, elo_pred, batch)
+        _, move_loss, elo_loss, elo_pred = self._get_loss(move_pred, elo_pred, batch)
         move_pred = self._format_move_pred(move_pred, batch)
 
         def to_numpy(torchd):

@@ -3,15 +3,11 @@ elo_params:
   predict: True
   loss: gaussian_nll
   initial_var: 1.e-1
-  warmup_var_steps: 3
-  warmup_elo_steps: 3   
+  warmup_var_steps: 0 
+  warmup_elo_steps: 0   
   weight: 1
-  edges: [1400, 1800, 2000, 2200, 2400, 4000]
+  edges: [4000]
 tc_groups: 
- 180: [0,1000]
- 300: [0,1000]
- 600: [0,1000]
- 1800: [1000]
  10800: [1000]
 model_args:
   predict_move: True
