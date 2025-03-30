@@ -293,7 +293,7 @@ class Transformer(nn.Module):
         else:
             return None
 
-    def _get_move_pred(self, hs: torch.Tensor):
+    def _get_move_pred(self, h: torch.Tensor):
         if self.params.predict_move:
             tc_outs = []
             for i in range(self.params.n_timecontrol_heads):
