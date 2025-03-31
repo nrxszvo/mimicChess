@@ -42,7 +42,6 @@ class MimicChessModule(L.LightningModule):
         self.opening_moves = params.opening_moves
         self.val_check_steps = params.val_check_steps
         self.max_steps = params.max_steps
-        self.move_loss = F.cross_entropy
         self.elo_params = params.elo_params
         if params.name:
             logger = TensorBoardLogger(".", name="L", version=params.name)
@@ -164,16 +163,18 @@ class MimicChessModule(L.LightningModule):
         else:
             tc_groups = batch["tc_groups"]
             bs, seqlen, _, ndim = pred.shape
-            index = tc_groups[:, None, None, None].expand([bs, seqlen, 1, ndim])
+            index = tc_groups[:, None, None, None].expand(
+                [bs, seqlen, 1, ndim])
             pred = torch.gather(pred, 2, index).squeeze(2)
 
         pred = pred.permute(0, 2, 1)
-        return pred[:, :, self.opening_moves :]
+        return pred[:, :, self.opening_moves:]
 
     def _get_elo_loss(self, elo_pred, batch):
         elo_pred = self._format_elo_pred(elo_pred, batch)
         if self.elo_params.loss == "cross_entropy":
-            loss = F.cross_entropy(elo_pred, batch["elo_target"], ignore_index=NOOP)
+            loss = F.cross_entropy(
+                elo_pred, batch["elo_target"], ignore_index=NOOP)
         elif self.elo_params.loss == "gaussian_nll":
             exp = elo_pred[:, 0]
             var = elo_pred[:, 1]
@@ -220,7 +221,7 @@ class MimicChessModule(L.LightningModule):
                 ])
                 subpred = torch.gather(subpred, 2, index).squeeze(2)
                 subpred = subpred.permute(0, 2, 1)
-                subpred = subpred[:, :, self.opening_moves :]
+                subpred = subpred[:, :, self.opening_moves:]
                 preds.append(subpred)
             padded = False
             if preds[1].shape[2] == preds[0].shape[2] - 1:
@@ -243,7 +244,7 @@ class MimicChessModule(L.LightningModule):
 
     def _get_loss(self, move_pred, elo_pred, batch):
         move_loss = self._get_move_loss(move_pred, batch)
-        loss = move_loss
+        loss = move_loss.clone()
         elo_loss = None
         if self._get_elo_warmup_stage() != "WARMUP_ELO":
             elo_loss, elo_pred = self._get_elo_loss(elo_pred, batch)
@@ -253,7 +254,8 @@ class MimicChessModule(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
-        loss, move_loss, elo_loss, elo_pred = self._get_loss(move_pred, elo_pred, batch)
+        loss, move_loss, elo_loss, elo_pred = self._get_loss(
+            move_pred, elo_pred, batch)
         self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         if move_loss is not None:
             self.log("train_move_loss", move_loss, sync_dist=True)
@@ -308,7 +310,24 @@ class MimicChessModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
-        _, move_loss, elo_loss, elo_pred = self._get_loss(move_pred, elo_pred, batch)
+        _, move_loss, elo_loss, elo_pred = self._get_loss(
+            move_pred, elo_pred, batch)
+
+        def get_correlation(preds, tgts):
+            bs, seqlen, ntc, nelo, ndim = preds.shape
+            _, mvs = torch.sort(preds, dim=4, descending=True)
+            mvs = mvs.reshape(bs, seqlen, ntc*nelo, ndim)[:, :, :, 0]
+            nunique = 0
+            ntotal = 0
+            for i in range(bs):
+                indices = (tgts[i] != NOOP).nonzero()
+                idx = indices[torch.randint(
+                    indices.shape[0], (1,)).item()].item()
+                unimtx = torch.unique(mvs[i, idx])
+                nunique += unimtx.numel()
+                ntotal += 1
+            return nunique / ntotal
+        dvsty = 0  # get_correlation(move_pred, batch['move_target'])
         move_pred = self._format_move_pred(move_pred, batch)
 
         def to_numpy(torchd):
@@ -330,6 +349,7 @@ class MimicChessModule(L.LightningModule):
             tprobs = (probs * mask).sum(dim=1)
 
             return to_numpy({
+                'diversity': dvsty,
                 "sorted_tokens": smoves,
                 "sorted_probs": sprobs,
                 "target_probs": tprobs,

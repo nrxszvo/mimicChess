@@ -41,13 +41,12 @@ parser.add_argument(
 
 
 @torch.inference_mode()
-def evaluate(outputs, seq_len, elo_edges):
+def evaluate(outputs):
     nbatch = len(outputs)
-    acc_stats = AccuracyStats(seq_len, elo_edges, 2 / len(elo_edges))
-    tstats = TargetStats()
     game_stats = LegalGameStats()
     move_stats = MoveStats()
 
+    dvsty = []
     elo_loss = np.array([elo_op["loss"] for _, elo_op in outputs]).mean()
     move_loss = np.array([mv_op["loss"] for mv_op, _ in outputs]).mean()
     loc_err = np.array([
@@ -58,14 +57,16 @@ def evaluate(outputs, seq_len, elo_edges):
         elo_op["average_std"] if "average_std" in elo_op else 0
         for _, elo_op in outputs
     ]).mean()
-    for i, (move_data, elo_data) in enumerate(outputs):
+    for i, (move_data, _) in enumerate(outputs):
         print(f"Evaluation {int(100 * i / nbatch)}% done", end="\r")
+        dvsty.append(move_data['diversity'])
         game_stats.eval(
             move_data["sorted_tokens"], move_data["openings"], move_data["targets"]
         )
         move_stats.eval(move_data["sorted_tokens"], move_data["targets"])
 
     report = (
+        [f'diversity: {np.mean(dvsty)}'] +
         game_stats.report()
         + move_stats.report()
         + [f"Location error: {loc_err:.1f}", f"Average std: {avg_std:.1f}"]
@@ -105,7 +106,7 @@ def main():
     datadir = cfgyml.datadir if args.datadir is None else args.datadir
     outputs, seq_len = predict(
         cfgyml, datadir, args.cp, args.nsamp, args.constant_var)
-    report = evaluate(outputs, seq_len, cfgyml.elo_params.edges)
+    report = evaluate(outputs)
     print()
     for line in report:
         print(line)
