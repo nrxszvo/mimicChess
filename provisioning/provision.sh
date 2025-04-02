@@ -75,6 +75,7 @@ then
 	sudo -E bash nodesource_setup.sh
 	sudo apt-get install -y nodejs
 fi
+sudo npm install --global prettier
 if ! command -v yarn 2>&1 > /dev/null
 then
 	sudo npm install --global yarn
