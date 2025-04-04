@@ -265,12 +265,16 @@ class Transformer(nn.Module):
                 self.elo_heads.append(EloHead(params))
 
         if params.predict_move:
-            self.move_heads = nn.ModuleList()
+            self.white_heads = nn.ModuleList()
+            self.black_heads = nn.ModuleList()
             for _ in range(params.n_timecontrol_heads):
-                elo_heads = nn.ModuleList()
+                welo_heads = nn.ModuleList()
+                belo_heads = nn.ModuleList()
                 for _ in range(params.n_elo_heads):
-                    elo_heads.append(MoveHead(params))
-                self.move_heads.append(elo_heads)
+                    welo_heads.append(MoveHead(params))
+                    belo_heads.append(MoveHead(params))
+                self.white_heads.append(welo_heads)
+                self.black_heads.append(belo_heads)
 
         self.freqs_cis = precompute_freqs_cis(
             params.dim // params.n_heads,
@@ -279,7 +283,7 @@ class Transformer(nn.Module):
         )
 
     def _reshape_timecontrol(self, h):
-        bs, seqlen, dim = h.shape
+        bs, seqlen, _ = h.shape
         h = h.reshape(bs, seqlen, self.params.n_timecontrol_heads, -1)
         return h
 
@@ -299,8 +303,9 @@ class Transformer(nn.Module):
             for i in range(self.params.n_timecontrol_heads):
                 elo_outs = []
                 for j in range(self.params.n_elo_heads):
-                    h_out = self.move_heads[i][j](h[:, :, i])
-                    elo_outs.append(h_out)
+                    w_out = self.white_heads[i][j](h[:, :, i])
+                    b_out = self.black_heads[i][j](h[:, :, i])
+                    elo_outs.append(torch.stack([w_out, b_out], dim=2))
                 tc_outs.append(torch.stack(elo_outs, dim=2))
             return torch.stack(tc_outs, dim=2)
         else:

@@ -85,9 +85,13 @@ class MimicChessModule(L.LightningModule):
         if pretrain_cp:
             weights = torch.load(pretrain_cp)
             for i in range(self.params.model_args.n_timecontrol_heads):
-                for j in range(1, self.params.model_args.n_elo_heads):
-                    weights[f'model.move_heads.{i}.{j}.norm.weight'] = weights['model.move_heads.0.0.norm.weight']
-                    weights[f'model.move_heads.{i}.{j}.output.weight'] = weights['model.move_heads.0.0.output.weight']
+                for j in range(self.params.model_args.n_elo_heads):
+                    for color in ['white', 'black']:
+                        weights[f'model.{color}_heads.{i}.{j}.norm.weight'] = weights['model.move_heads.0.0.norm.weight']
+                        weights[f'model.{color}_heads.{i}.{j}.output.weight'] = weights['model.move_heads.0.0.output.weight']
+            del weights['model.move_heads.0.0.norm.weight']
+            del weights['model.move_heads.0.0.output.weight']
+
             self.load_state_dict(weights)
 
     def num_params(self):
@@ -197,25 +201,25 @@ class MimicChessModule(L.LightningModule):
         return loss, elo_pred
 
     def _select_tc_head_outputs(self, pred, tc_groups):
-        bs, seqlen, _, nelo, ndim = pred.shape
-        index = tc_groups[:, None, None, None, None].expand([
+        bs, seqlen, _, nelo, ncolor, ndim = pred.shape
+        index = tc_groups[:, None, None, None, None, None].expand([
             bs,
             seqlen,
             1,
             nelo,
+            ncolor,
             ndim,
         ])
         return torch.gather(pred, 2, index).squeeze(2)
 
     def _select_elo_head_outputs(self, pred, elo_groups):
-        bs, seqlen, _, ndim = pred.shape
+        bs, seqlen, _, _, ndim = pred.shape
         preds = []
         for i in [0, 1]:
-            subpred = pred[:, i::2]
-            halfseqlen = subpred.shape[1]
+            subpred = pred[:, :, :, i]
             index = elo_groups[:, i, None, None, None].expand([
                 bs,
-                halfseqlen,
+                seqlen,
                 1,
                 ndim,
             ])
@@ -224,18 +228,6 @@ class MimicChessModule(L.LightningModule):
             subpred = subpred[:, :, self.opening_moves:]
             preds.append(subpred)
 
-        padded = False
-        if preds[1].shape[2] == preds[0].shape[2] - 1:
-            padded = True
-            seqlen += 1
-            preds[1] = torch.cat(
-                [preds[1], torch.zeros_like(preds[1][:, :, 0:1])], dim=2
-            )
-
-        preds = torch.stack(preds, dim=3).reshape(bs, ndim, seqlen)
-
-        if padded:
-            preds = preds[:, :, :-1]
         return preds
 
     def _format_move_pred(self, pred, batch):
@@ -245,15 +237,21 @@ class MimicChessModule(L.LightningModule):
             pred = self._select_tc_head_outputs(pred, batch['tc_groups'])
 
         if self.params.model_args.n_elo_heads == 1:
-            pred = pred[:, :, 0].permute(0, 2, 1)
+            preds = [pred[:, :, 0].permute(0, 2, 1), None]
         else:
-            pred = self._select_elo_head_outputs(pred, batch['elo_groups'])
+            preds = self._select_elo_head_outputs(pred, batch['elo_groups'])
 
-        return pred
+        return preds
 
     def _get_move_loss(self, move_pred, batch):
-        move_preds = self._format_move_pred(move_pred, batch)
-        return F.cross_entropy(move_preds, batch["move_target"], ignore_index=NOOP)
+        w_preds, b_preds = self._format_move_pred(move_pred, batch)
+        loss = F.cross_entropy(
+            w_preds, batch["move_target"], ignore_index=NOOP)
+        if b_preds is not None:
+            loss += F.cross_entropy(
+                b_preds, batch["move_target"], ignore_index=NOOP)
+            loss /= 2
+        return loss
 
     def _get_loss(self, move_pred, elo_pred, batch):
         move_loss = self._get_move_loss(move_pred, batch)
