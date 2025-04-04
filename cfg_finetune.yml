@@ -1,4 +1,4 @@
-datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_10m_tc600
+datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_finetune_tc600
 pretrain_cp: ckpts/dual_single-head/pretrain_weights.ckpt
 elo_params:
   predict: True
