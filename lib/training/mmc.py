@@ -84,7 +84,7 @@ class MimicChessModule(L.LightningModule):
             self.model = Transformer(self.model_args)
         if pretrain_cp:
             weights = torch.load(pretrain_cp)
-            for i in range(1, self.params.model_args.n_timecontrol_heads):
+            for i in range(self.params.model_args.n_timecontrol_heads):
                 for j in range(1, self.params.model_args.n_elo_heads):
                     weights[f'model.move_heads.{i}.{j}.norm.weight'] = weights['model.move_heads.0.0.norm.weight']
                     weights[f'model.move_heads.{i}.{j}.output.weight'] = weights['model.move_heads.0.0.output.weight']
