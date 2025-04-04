@@ -45,8 +45,8 @@ def evaluate(outputs):
     nbatch = len(outputs)
     game_stats = LegalGameStats()
     move_stats = MoveStats()
+    rand_move_stats = MoveStats()
 
-    dvsty = []
     elo_loss = np.array([elo_op["loss"] for _, elo_op in outputs]).mean()
     move_loss = np.array([mv_op["loss"] for mv_op, _ in outputs]).mean()
     loc_err = np.array([
@@ -57,18 +57,21 @@ def evaluate(outputs):
         elo_op["average_std"] if "average_std" in elo_op else 0
         for _, elo_op in outputs
     ]).mean()
+
     for i, (move_data, _) in enumerate(outputs):
         print(f"Evaluation {int(100 * i / nbatch)}% done", end="\r")
-        dvsty.append(move_data['diversity'])
         game_stats.eval(
             move_data["sorted_tokens"], move_data["openings"], move_data["targets"]
         )
         move_stats.eval(move_data["sorted_tokens"], move_data["targets"])
+        rand_move_stats.eval(move_data['rand_tokens'], move_data['targets'])
 
     report = (
-        [f'diversity: {np.mean(dvsty)}'] +
         game_stats.report()
+        + ['Target Head Stats:']
         + move_stats.report()
+        + ['Random Head Stats:']
+        + rand_move_stats.report()
         + [f"Location error: {loc_err:.1f}", f"Average std: {avg_std:.1f}"]
         + [f"Elo loss: {elo_loss:.2f}", f"Move loss: {move_loss:.2f}"]
     )

@@ -66,7 +66,6 @@ def init_modules(
 
     module_args = MMCModuleArgs(
         name=name,
-        outdir=outdir,
         elo_params=cfgyml.elo_params,
         model_args=model_args,
         opening_moves=dm.opening_moves,
@@ -76,7 +75,10 @@ def init_modules(
         random_seed=cfgyml.random_seed,
         strategy=strategy,
         devices=devices,
+        outdir=outdir,
     )
+    if hasattr(cfgyml, 'pretrain_cp'):
+        module_args.pretrain_cp = cfgyml.pretrain_cp
     if cp is not None:
         mmc = MimicChessModule.load_from_checkpoint(cp, params=module_args)
     else:

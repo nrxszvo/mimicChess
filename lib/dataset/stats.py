@@ -7,7 +7,7 @@ import argparse
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument(
-    "npydir", help="top-level directory containing either fmd.json or block folders"
+    "--npydir", required=True, help="top-level directory containing either fmd.json or block folders"
 )
 parser.add_argument(
     "--elo_hist",
@@ -24,6 +24,8 @@ parser.add_argument(
     action="store_true",
     help="generate histogram of game time controls",
 )
+parser.add_argument('--time_hist_edges', nargs='+', type=int,
+                    default=[0, 300, 600, 1800, 10800], help='time edges in seconds for time_hist')
 parser.add_argument('--plot', action='store_true',
                     help='generate pyplot plots')
 parser.add_argument('--title', default=None, help='plot title')
@@ -130,7 +132,7 @@ def elo_hist(
         plt.savefig("elos.png", dpi=500)
 
 
-def time_hist(blocks, edges=[0, 181, 301, 601, 1801, 10801]):
+def time_hist(blocks, edges):
     for grp in ["0", ">0"]:
         all_hs = None
         if "train" in blocks[0]:
@@ -162,7 +164,7 @@ def time_hist(blocks, edges=[0, 181, 301, 601, 1801, 10801]):
                     all_hs += hs
 
         print(f"Increment: {grp}")
-        for h, e in zip(all_hs, es[1:]):
+        for h, e in zip(all_hs, es):
             print(f"\t{int(e)}: {h:.1e}")
 
 
@@ -278,4 +280,4 @@ if __name__ == "__main__":
             elo_matrix(welos, belos, **kwargs)
 
     if args.time_hist:
-        time_hist(blocks)
+        time_hist(blocks, args.time_hist_edges)

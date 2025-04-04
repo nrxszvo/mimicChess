@@ -19,16 +19,17 @@ from .model import ModelArgs, Transformer
 @dataclass
 class MMCModuleArgs:
     name: str
-    outdir: str
     elo_params: Any
     model_args: ModelArgs
     opening_moves: int
     lr_scheduler_params: Any
     max_steps: int
     val_check_steps: int
-    random_seed: Optional[int]
-    strategy: Optional[str]
-    devices: Optional[int]
+    random_seed: Optional[int] = 0
+    strategy: Optional[str] = 'auto'
+    devices: Optional[int] = 0
+    outdir: Optional[str] = None
+    pretrain_cp: Optional[str] = None
 
 
 class MimicChessModule(L.LightningModule):
@@ -37,7 +38,6 @@ class MimicChessModule(L.LightningModule):
         self.save_hyperparameters()
         self.params = params
         L.seed_everything(params.random_seed, workers=True)
-        self.model = None
         self.model_args = params.model_args
         self.opening_moves = params.opening_moves
         self.val_check_steps = params.val_check_steps
@@ -76,13 +76,19 @@ class MimicChessModule(L.LightningModule):
                 )
             )
 
-        self._init_model()
+        self._init_model(params.pretrain_cp)
         self.trainer = L.Trainer(**self.trainer_kwargs)
 
-    def _init_model(self):
-        if self.model is not None:
-            return
-        self.model = Transformer(self.model_args)
+    def _init_model(self, pretrain_cp):
+        if not hasattr(self, 'model'):
+            self.model = Transformer(self.model_args)
+        if pretrain_cp:
+            weights = torch.load(pretrain_cp)
+            for i in range(1, self.params.model_args.n_timecontrol_heads):
+                for j in range(1, self.params.model_args.n_elo_heads):
+                    weights[f'model.move_heads.{i}.{j}.norm.weight'] = weights['model.move_heads.0.0.norm.weight']
+                    weights[f'model.move_heads.{i}.{j}.output.weight'] = weights['model.move_heads.0.0.output.weight']
+            self.load_state_dict(weights)
 
     def num_params(self):
         nparams = 0
@@ -190,53 +196,60 @@ class MimicChessModule(L.LightningModule):
 
         return loss, elo_pred
 
+    def _select_tc_head_outputs(self, pred, tc_groups):
+        bs, seqlen, _, nelo, ndim = pred.shape
+        index = tc_groups[:, None, None, None, None].expand([
+            bs,
+            seqlen,
+            1,
+            nelo,
+            ndim,
+        ])
+        return torch.gather(pred, 2, index).squeeze(2)
+
+    def _select_elo_head_outputs(self, pred, elo_groups):
+        bs, seqlen, _, ndim = pred.shape
+        preds = []
+        for i in [0, 1]:
+            subpred = pred[:, i::2]
+            halfseqlen = subpred.shape[1]
+            index = elo_groups[:, i, None, None, None].expand([
+                bs,
+                halfseqlen,
+                1,
+                ndim,
+            ])
+            subpred = torch.gather(subpred, 2, index).squeeze(2)
+            subpred = subpred.permute(0, 2, 1)
+            subpred = subpred[:, :, self.opening_moves:]
+            preds.append(subpred)
+
+        padded = False
+        if preds[1].shape[2] == preds[0].shape[2] - 1:
+            padded = True
+            seqlen += 1
+            preds[1] = torch.cat(
+                [preds[1], torch.zeros_like(preds[1][:, :, 0:1])], dim=2
+            )
+
+        preds = torch.stack(preds, dim=3).reshape(bs, ndim, seqlen)
+
+        if padded:
+            preds = preds[:, :, :-1]
+        return preds
+
     def _format_move_pred(self, pred, batch):
-        bs, seqlen, _, nelo, npred = pred.shape
         if self.params.model_args.n_timecontrol_heads == 1:
             pred = pred[:, :, 0]
         else:
-            tc_groups = batch["tc_groups"]
-            index = tc_groups[:, None, None, None, None].expand([
-                bs,
-                seqlen,
-                1,
-                nelo,
-                npred,
-            ])
-            pred = torch.gather(pred, 2, index).squeeze(2)
+            pred = self._select_tc_head_outputs(pred, batch['tc_groups'])
 
         if self.params.model_args.n_elo_heads == 1:
-            preds = pred[:, :, 0].permute(0, 2, 1)
+            pred = pred[:, :, 0].permute(0, 2, 1)
         else:
-            preds = []
-            elo_groups = batch["elo_groups"]
-            for i in [0, 1]:
-                subpred = pred[:, i::2]
-                halfseqlen = subpred.shape[1]
-                index = elo_groups[:, i, None, None, None].expand([
-                    bs,
-                    halfseqlen,
-                    1,
-                    npred,
-                ])
-                subpred = torch.gather(subpred, 2, index).squeeze(2)
-                subpred = subpred.permute(0, 2, 1)
-                subpred = subpred[:, :, self.opening_moves:]
-                preds.append(subpred)
-            padded = False
-            if preds[1].shape[2] == preds[0].shape[2] - 1:
-                padded = True
-                seqlen += 1
-                preds[1] = torch.cat(
-                    [preds[1], torch.zeros_like(preds[1][:, :, 0:1])], dim=2
-                )
+            pred = self._select_elo_head_outputs(pred, batch['elo_groups'])
 
-            preds = torch.stack(preds, dim=3).reshape(bs, npred, seqlen)
-
-            if padded:
-                preds = preds[:, :, :-1]
-
-        return preds
+        return pred
 
     def _get_move_loss(self, move_pred, batch):
         move_preds = self._format_move_pred(move_pred, batch)
@@ -308,27 +321,17 @@ class MimicChessModule(L.LightningModule):
         avg_std = u_std_preds.sum() / npred
         return avg_std, u_std_preds
 
+    def _random_move_pred(self, pred):
+        bs, _, ntc, nelo, _ = pred.shape
+        tc_groups = torch.randint(0, ntc, (bs,)).to(pred.device)
+        pred = self._select_tc_head_outputs(pred, tc_groups)
+        elo_groups = torch.randint(0, nelo, (bs, 2)).to(pred.device)
+        return self._select_elo_head_outputs(pred, elo_groups)
+
     def predict_step(self, batch, batch_idx):
         move_pred, elo_pred = self(batch["input"])
         _, move_loss, elo_loss, elo_pred = self._get_loss(
             move_pred, elo_pred, batch)
-
-        def get_correlation(preds, tgts):
-            bs, seqlen, ntc, nelo, ndim = preds.shape
-            _, mvs = torch.sort(preds, dim=4, descending=True)
-            mvs = mvs.reshape(bs, seqlen, ntc*nelo, ndim)[:, :, :, 0]
-            nunique = 0
-            ntotal = 0
-            for i in range(bs):
-                indices = (tgts[i] != NOOP).nonzero()
-                idx = indices[torch.randint(
-                    indices.shape[0], (1,)).item()].item()
-                unimtx = torch.unique(mvs[i, idx])
-                nunique += unimtx.numel()
-                ntotal += 1
-            return nunique / ntotal
-        dvsty = 0  # get_correlation(move_pred, batch['move_target'])
-        move_pred = self._format_move_pred(move_pred, batch)
 
         def to_numpy(torchd):
             npd = {}
@@ -338,21 +341,37 @@ class MimicChessModule(L.LightningModule):
                 npd[k] = v
             return npd
 
-        def get_move_data():
+        def get_top_5_moves(move_pred):
             probs = torch.softmax(move_pred, dim=1)
             sprobs, smoves = torch.sort(probs, dim=1, descending=True)
             sprobs = sprobs[:, :5]
             smoves = smoves[:, :5]
+            return probs, sprobs, smoves
+
+        def get_move_data():
+            fmt_pred = self._format_move_pred(move_pred, batch)
+            fmt_probs, fmt_top_probs, fmt_top_moves = get_top_5_moves(fmt_pred)
+
+            rand_pred = self._random_move_pred(move_pred)
+            rand_probs, rand_top_probs, rand_top_moves = get_top_5_moves(
+                rand_pred)
 
             tgts = batch["move_target"]
-            mask = F.one_hot(tgts, probs.shape[1]).permute(0, 2, 1)
-            tprobs = (probs * mask).sum(dim=1)
+
+            def get_target_probs(probs):
+                mask = F.one_hot(tgts, probs.shape[1]).permute(0, 2, 1)
+                return (probs * mask).sum(dim=1)
+
+            fmt_tgt_probs = get_target_probs(fmt_probs)
+            rand_tgt_probs = get_target_probs(rand_probs)
 
             return to_numpy({
-                'diversity': dvsty,
-                "sorted_tokens": smoves,
-                "sorted_probs": sprobs,
-                "target_probs": tprobs,
+                "sorted_tokens": fmt_top_moves,
+                "sorted_probs": fmt_top_probs,
+                "target_probs": fmt_tgt_probs,
+                'rand_tokens': rand_top_moves,
+                'rand_probs': rand_top_probs,
+                'rand_target_probs': rand_tgt_probs,
                 "openings": batch["opening"],
                 "targets": tgts,
                 "loss": move_loss.item(),
