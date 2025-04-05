@@ -71,8 +71,8 @@ class MimicChessModule(L.LightningModule):
             self.trainer_kwargs["callbacks"].append(
                 ModelCheckpoint(
                     dirpath=params.outdir,
-                    filename=params.name + "-{valid_loss:.2f}",
-                    monitor="valid_loss",
+                    filename=params.name + "-{valid_move_loss:.2f}",
+                    monitor="valid_move_loss",
                 )
             )
 
@@ -201,6 +201,8 @@ class MimicChessModule(L.LightningModule):
         return loss, elo_pred
 
     def _select_tc_head_outputs(self, pred, tc_groups):
+        if self.params.model_args.n_timecontrol_heads == 1:
+            return pred[:, :, 0]
         bs, seqlen, _, nelo, ncolor, ndim = pred.shape
         index = tc_groups[:, None, None, None, None, None].expand([
             bs,
@@ -213,6 +215,9 @@ class MimicChessModule(L.LightningModule):
         return torch.gather(pred, 2, index).squeeze(2)
 
     def _select_elo_head_outputs(self, pred, elo_groups):
+        if self.params.model_args.n_elo_heads == 1:
+            return [pred[:, :, 0, 0].permute(0, 2, 1), None]
+
         bs, seqlen, _, _, ndim = pred.shape
         preds = []
         for i in [0, 1]:
@@ -231,16 +236,8 @@ class MimicChessModule(L.LightningModule):
         return preds
 
     def _format_move_pred(self, pred, batch):
-        if self.params.model_args.n_timecontrol_heads == 1:
-            pred = pred[:, :, 0]
-        else:
-            pred = self._select_tc_head_outputs(pred, batch['tc_groups'])
-
-        if self.params.model_args.n_elo_heads == 1:
-            preds = [pred[:, :, 0].permute(0, 2, 1), None]
-        else:
-            preds = self._select_elo_head_outputs(pred, batch['elo_groups'])
-
+        pred = self._select_tc_head_outputs(pred, batch['tc_groups'])
+        preds = self._select_elo_head_outputs(pred, batch['elo_groups'])
         return preds
 
     def _get_move_loss(self, move_pred, batch):
@@ -256,7 +253,7 @@ class MimicChessModule(L.LightningModule):
     def _get_loss(self, move_pred, elo_pred, batch):
         move_loss = self._get_move_loss(move_pred, batch)
         loss = move_loss.clone()
-        elo_loss = None
+        elo_loss = torch.zeros_like(elo_pred[0, 0, 0, 0])
         if self._get_elo_warmup_stage() != "WARMUP_ELO":
             elo_loss, elo_pred = self._get_elo_loss(elo_pred, batch)
             loss += self.elo_params.weight * elo_loss
@@ -267,9 +264,10 @@ class MimicChessModule(L.LightningModule):
         move_pred, elo_pred = self(batch["input"])
         loss, move_loss, elo_loss, elo_pred = self._get_loss(
             move_pred, elo_pred, batch)
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("train_loss", loss, sync_dist=True)
         if move_loss is not None:
-            self.log("train_move_loss", move_loss, sync_dist=True)
+            self.log("train_move_loss", move_loss,
+                     prog_bar=True, sync_dist=True)
         if elo_loss is not None:
             self.log("train_elo_loss", elo_loss, sync_dist=True)
         if (
@@ -295,9 +293,10 @@ class MimicChessModule(L.LightningModule):
         if torch.isnan(valid_loss):
             raise Exception("Loss is NaN, training stopped.")
 
-        self.log("valid_loss", valid_loss, prog_bar=True, sync_dist=True)
+        self.log("valid_loss", valid_loss, sync_dist=True)
         if move_loss is not None:
-            self.log("valid_move_loss", move_loss, sync_dist=True)
+            self.log("valid_move_loss", move_loss,
+                     prog_bar=True, sync_dist=True)
         if elo_loss is not None:
             self.log("valid_elo_loss", elo_loss, sync_dist=True)
         if (
@@ -320,7 +319,7 @@ class MimicChessModule(L.LightningModule):
         return avg_std, u_std_preds
 
     def _random_move_pred(self, pred):
-        bs, _, ntc, nelo, _ = pred.shape
+        bs, _, ntc, nelo, _, _ = pred.shape
         tc_groups = torch.randint(0, ntc, (bs,)).to(pred.device)
         pred = self._select_tc_head_outputs(pred, tc_groups)
         elo_groups = torch.randint(0, nelo, (bs, 2)).to(pred.device)
@@ -346,22 +345,35 @@ class MimicChessModule(L.LightningModule):
             smoves = smoves[:, :5]
             return probs, sprobs, smoves
 
+        def combine_moves(w_pred, b_pred):
+            if b_pred is None:
+                return w_pred
+            bs, seqlen, dim = w_pred.shape
+            w_pred = w_pred[:, ::2]
+            b_pred = b_pred[:, 1::2]
+            if seqlen % 2 == 1:
+                b_pred = torch.cat(
+                    [b_pred, torch.zeros_like(b_pred[:, :1])], dim=1)
+            fmt_pred = torch.stack(
+                [w_pred, b_pred], dim=2).reshape(bs, -1, dim)
+            if seqlen % 2 == 1:
+                fmt_pred = fmt_pred[:, :-1]
+            return fmt_pred
+
         def get_move_data():
-            fmt_pred = self._format_move_pred(move_pred, batch)
+            w_pred, b_pred = self._format_move_pred(move_pred, batch)
+            fmt_pred = combine_moves(w_pred, b_pred)
             fmt_probs, fmt_top_probs, fmt_top_moves = get_top_5_moves(fmt_pred)
 
-            rand_pred = self._random_move_pred(move_pred)
+            w_rand, b_rand = self._random_move_pred(move_pred)
+            rand_pred = combine_moves(w_rand, b_rand)
             rand_probs, rand_top_probs, rand_top_moves = get_top_5_moves(
                 rand_pred)
 
             tgts = batch["move_target"]
-
-            def get_target_probs(probs):
-                mask = F.one_hot(tgts, probs.shape[1]).permute(0, 2, 1)
-                return (probs * mask).sum(dim=1)
-
-            fmt_tgt_probs = get_target_probs(fmt_probs)
-            rand_tgt_probs = get_target_probs(rand_probs)
+            mask = F.one_hot(tgts, fmt_probs.shape[1]).permute(0, 2, 1)
+            fmt_tgt_probs = (fmt_probs*mask).sum(dim=1)
+            rand_tgt_probs = (rand_probs*mask).sum(dim=1)
 
             return to_numpy({
                 "sorted_tokens": fmt_top_moves,
@@ -407,11 +419,5 @@ class MimicChessModule(L.LightningModule):
     def predict(self, datamodule):
         tkargs = self.trainer_kwargs
         trainer = L.Trainer(**tkargs)
-        outputs = trainer.predict(self, datamodule)
-        return outputs
-
-    def predict_elo(self, datamodule):
-        trainer = L.Trainer(**self.trainer_kwargs)
-        self.predict_step = self.predict_elo_step
         outputs = trainer.predict(self, datamodule)
         return outputs

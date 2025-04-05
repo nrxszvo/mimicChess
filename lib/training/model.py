@@ -265,16 +265,24 @@ class Transformer(nn.Module):
                 self.elo_heads.append(EloHead(params))
 
         if params.predict_move:
-            self.white_heads = nn.ModuleList()
-            self.black_heads = nn.ModuleList()
-            for _ in range(params.n_timecontrol_heads):
-                welo_heads = nn.ModuleList()
-                belo_heads = nn.ModuleList()
-                for _ in range(params.n_elo_heads):
-                    welo_heads.append(MoveHead(params))
-                    belo_heads.append(MoveHead(params))
-                self.white_heads.append(welo_heads)
-                self.black_heads.append(belo_heads)
+            if params.n_elo_heads > 1:
+                self.white_heads = nn.ModuleList()
+                self.black_heads = nn.ModuleList()
+                for _ in range(params.n_timecontrol_heads):
+                    welo_heads = nn.ModuleList()
+                    belo_heads = nn.ModuleList()
+                    for _ in range(params.n_elo_heads):
+                        welo_heads.append(MoveHead(params))
+                        belo_heads.append(MoveHead(params))
+                    self.white_heads.append(welo_heads)
+                    self.black_heads.append(belo_heads)
+            else:
+                self.move_heads = nn.ModuleList()
+                for _ in range(params.n_timecontrol_heads):
+                    elo_heads = nn.ModuleList()
+                    for _ in range(params.n_elo_heads):
+                        elo_heads.append(MoveHead(params))
+                    self.move_heads.append(elo_heads)
 
         self.freqs_cis = precompute_freqs_cis(
             params.dim // params.n_heads,
@@ -303,16 +311,20 @@ class Transformer(nn.Module):
             for i in range(self.params.n_timecontrol_heads):
                 elo_outs = []
                 for j in range(self.params.n_elo_heads):
-                    w_out = self.white_heads[i][j](h[:, :, i])
-                    b_out = self.black_heads[i][j](h[:, :, i])
-                    elo_outs.append(torch.stack([w_out, b_out], dim=2))
+                    if self.params.n_elo_heads > 1:
+                        w_out = self.white_heads[i][j](h[:, :, i])
+                        b_out = self.black_heads[i][j](h[:, :, i])
+                        elo_outs.append(torch.stack([w_out, b_out], dim=2))
+                    else:
+                        h_out = self.move_heads[i][j](h[:, :, i, None])
+                        elo_outs.append(h_out)
                 tc_outs.append(torch.stack(elo_outs, dim=2))
             return torch.stack(tc_outs, dim=2)
         else:
             return None
 
     def forward(self, tokens: torch.Tensor, start_pos: int = 0):
-        _bsz, seqlen = tokens.shape
+        _, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
 
         self.freqs_cis = self.freqs_cis.to(h.device)

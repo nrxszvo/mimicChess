@@ -6,8 +6,8 @@ import numpy as np
 
 from lib import (
     get_config,
-    AccuracyStats,
-    TargetStats,
+    # AccuracyStats,
+    # TargetStats,
     LegalGameStats,
     MoveStats,
     init_modules,

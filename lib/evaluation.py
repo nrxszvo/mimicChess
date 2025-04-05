@@ -18,12 +18,12 @@ class LegalGameStats:
             pred, opn, tgt = gameq.get()
             if pred is None:
                 break
-            nmoves, nfail, reasons = count_invalid(pred[0], opn, tgt)
-            nvalid_moves = nmoves - nfail
-            resultq.put((nvalid_moves, nmoves, nfail == 0, reasons))
+            nmoves, nfails, reasons = count_invalid(pred, opn, tgt)
+            nvalid_moves = nmoves - nfails[0]
+            resultq.put((nvalid_moves, nmoves, nfails, reasons))
 
     def __init__(self, nproc=os.cpu_count()-1):
-        self.nvalid_games = 0
+        self.nvalid_games = [0]
         self.ntotal_games = 0
         self.nvalid_moves = 0
         self.ntotal_moves = 0
@@ -47,26 +47,30 @@ class LegalGameStats:
         for game in zip(tokens, opening, tgts):
             if SINGLE_THREAD:
                 pred, opn, tgt = game
-                nmoves, nfail, reasons = count_invalid(pred[0], opn, tgt)
-                nvalid_moves = nmoves - nfail
+                nmoves, nfails, reasons = count_invalid(pred, opn, tgt)
+                nvalid_moves = nmoves - nfails[0]
                 self.nvalid_moves += nvalid_moves
                 self.ntotal_moves += nmoves
-                if nfail == 0:
-                    self.nvalid_games += 1
-                else:
-                    self.reasons.update(reasons)
+                for i, nfail in enumerate(nfails):
+                    if nfail == 0:
+                        if len(self.nvalid_games) <= i:
+                            self.nvalid_games.append(0)
+                        self.nvalid_games[i] += 1
+                self.reasons.update(reasons)
             else:
                 self.gameq.put(game)
 
         if not SINGLE_THREAD:
             for _ in range(ngames):
-                nvalid_moves, nmoves, is_valid_game, reasons = self.resultq.get()
+                nvalid_moves, nmoves, nfails, reasons = self.resultq.get()
                 self.nvalid_moves += nvalid_moves
                 self.ntotal_moves += nmoves
-                if is_valid_game:
-                    self.nvalid_games += 1
-                else:
-                    self.reasons.update(reasons)
+                for i, nfail in enumerate(nfails):
+                    if nfail == 0:
+                        if len(self.nvalid_games) <= i:
+                            self.nvalid_games.append(0)
+                        self.nvalid_games[i] += 1
+                self.reasons.update(reasons)
 
     def __del__(self):
         for _ in range(len(self.procs)):
@@ -76,9 +80,10 @@ class LegalGameStats:
 
     def report(self):
         lines = []
-        lines.append(
-            f"Legal game frequency: {100 * self.nvalid_games / self.ntotal_games:.3f}%"
-        )
+        for i, nvalid in enumerate(self.nvalid_games):
+            lines.append(
+                f"Move {i+1} Legal game frequency: {100 * nvalid / self.ntotal_games:.3f}%"
+            )
         lines.append(
             f"Legal move frequency: {100 * self.nvalid_moves / self.ntotal_moves:.3f}%"
         )
