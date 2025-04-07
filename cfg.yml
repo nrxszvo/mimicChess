@@ -1,4 +1,4 @@
-datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_10m_tc600
+datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_inf_tc600
 elo_params:
   predict: True
   loss: gaussian_nll 
@@ -28,8 +28,8 @@ lr_scheduler_params:
   warmup_steps: 25000
 accumulate_grad_batches: 1
 opening_moves: 0
-batch_size: 4 
-max_steps: 1.e+6 
+effective_batch_size: 1024
+effective_max_steps: 7.7e+5 
 val_check_steps: 25000
 strategy: ddp
 random_seed: 0

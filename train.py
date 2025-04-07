@@ -6,7 +6,8 @@ import torch
 
 from lib import init_modules, get_config
 
-parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", default="cfg.yml", help="yaml config file")
 parser.add_argument(
     "--save_path",
@@ -54,7 +55,8 @@ def main():
     cfgyml.save(os.path.join(save_path, args.cfg))
     nweights, nflpweights = mmc.num_params()
     est_tflops = (
-        6 * nflpweights * cfgyml.batch_size * cfgyml.model_args.max_seq_len / 1e12
+        6 * nflpweights * cfgyml.effective_batch_size *
+        cfgyml.model_args.max_seq_len / 1e12
     )
     print(f"# model params: {nweights:.2e}")
     print(f"estimated TFLOPs: {est_tflops:.1f}")

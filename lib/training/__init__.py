@@ -51,12 +51,16 @@ def init_modules(
         whiten_params = (fmd["elo_mean"], fmd["elo_std"])
     cfgyml.elo_params.whiten_params = whiten_params
 
+    assert cfgyml.effective_batch_size % cfgyml.accumulate_grad_batches == 0
+    batch_size = int(cfgyml.effective_max_steps /
+                     cfgyml.accumulate_grad_batches)
+
     dm = MMCDataModule(
         datadir=datadir,
         elo_edges=cfgyml.elo_params.edges,
         tc_groups=cfgyml.tc_groups,
         max_seq_len=model_args.max_seq_len,
-        batch_size=cfgyml.batch_size,
+        batch_size=batch_size,
         num_workers=n_workers,
         whiten_params=whiten_params,
         max_testsamp=n_samp,
@@ -64,13 +68,14 @@ def init_modules(
     )
     cfgyml.elo_params.constant_var = constant_var
 
+    max_steps = int(cfgyml.effective_max_steps*cfgyml.accumulate_grad_batches)
     module_args = MMCModuleArgs(
         name=name,
         elo_params=cfgyml.elo_params,
         model_args=model_args,
         opening_moves=dm.opening_moves,
         lr_scheduler_params=cfgyml.lr_scheduler_params,
-        max_steps=cfgyml.max_steps,
+        max_steps=max_steps,
         val_check_steps=cfgyml.val_check_steps,
         accumulate_grad_batches=cfgyml.accumulate_grad_batches,
         random_seed=cfgyml.random_seed,
