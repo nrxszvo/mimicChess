@@ -12,7 +12,7 @@ tc_groups:
 model_args:
   predict_move: True
   dim: 2048 
-  n_layers: 32
+  n_layers: 16
   n_heads: 32
   n_kv_heads:  
   vocab_size: 2048
@@ -26,9 +26,9 @@ lr_scheduler_params:
   name: "WarmUpCosine"
   min_lr: 3.e-6
   warmup_steps: 25000
-accumulate_grad_batches: 8
+accumulate_grad_batches: 1
 opening_moves: 0
-batch_size: 1024 
+batch_size: 4 
 max_steps: 1.e+6 
 val_check_steps: 25000
 strategy: ddp
