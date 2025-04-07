@@ -72,6 +72,7 @@ def init_modules(
         lr_scheduler_params=cfgyml.lr_scheduler_params,
         max_steps=cfgyml.max_steps,
         val_check_steps=cfgyml.val_check_steps,
+        accumulate_grad_batches=cfgyml.accumulate_grad_batches,
         random_seed=cfgyml.random_seed,
         strategy=strategy,
         devices=devices,

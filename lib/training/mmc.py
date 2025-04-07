@@ -25,6 +25,7 @@ class MMCModuleArgs:
     lr_scheduler_params: Any
     max_steps: int
     val_check_steps: int
+    accumulate_grad_batches: int
     random_seed: Optional[int] = 0
     strategy: Optional[str] = 'auto'
     devices: Optional[int] = 0
@@ -66,6 +67,7 @@ class MimicChessModule(L.LightningModule):
             "precision": precision,
             "accelerator": accelerator,
             "callbacks": [TQDMProgressBar()],
+            'accumulate_grad_batches': params.accumulate_grad_batches
         }
         if params.outdir is not None:
             self.trainer_kwargs["callbacks"].append(
