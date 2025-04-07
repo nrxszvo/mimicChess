@@ -52,7 +52,7 @@ def init_modules(
     cfgyml.elo_params.whiten_params = whiten_params
 
     assert cfgyml.effective_batch_size % cfgyml.accumulate_grad_batches == 0
-    batch_size = int(cfgyml.effective_max_steps /
+    batch_size = int(cfgyml.effective_batch_size /
                      cfgyml.accumulate_grad_batches)
 
     dm = MMCDataModule(
