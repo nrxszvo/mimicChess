@@ -31,7 +31,7 @@ class MMCModuleArgs:
     devices: Optional[int] = 0
     outdir: Optional[str] = None
     pretrain_cp: Optional[str] = None
-    num_nodes: Optiona[int] = 1
+    num_nodes: Optional[int] = 1
 
 
 class MimicChessModule(L.LightningModule):
