@@ -31,5 +31,5 @@ opening_moves: 0
 effective_batch_size: 128
 effective_max_steps: 7.7e+5 
 effective_val_check_steps: 25000
-strategy: ddp
+strategy: fsdp 
 random_seed: 0
