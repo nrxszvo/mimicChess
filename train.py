@@ -46,7 +46,7 @@ def main():
     save_path = os.path.join(args.save_path, args.name)
     os.makedirs(save_path, exist_ok=True)
 
-    devices = int(os.environ.get("WORLD_SIZE", 1))
+    devices = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
 
     torch.set_float32_matmul_precision("high")
     torch.manual_seed(cfgyml.random_seed)
