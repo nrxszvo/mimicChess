@@ -48,6 +48,6 @@ do
 		exit
 	fi
 done
-cmd="OMP_NUM_THREADS=${nthread} NCCL_DEBUG=INFO torchrun --nnodes=${nnodes} --node-rank=${node_rank} --nproc-per-node=${nproc} --rdzv-id=${rdzv_id} --rdzv-backend=${rdzv_backend} --rdzv-endpoint=${rdzv_endpoint} train.py --name ${name} --commit ${commit} --cfg ${cfg} --num_nodes ${nnodes}"
+cmd="OMP_NUM_THREADS=${nthread} NCCL_DEBUG=INFO MASTER_ADDR=172.26.132.87 MASTER_PORT=29000 torchrun --nnodes=${nnodes} --node-rank=${node_rank} --nproc-per-node=${nproc} --rdzv-id=${rdzv_id} --rdzv-backend=${rdzv_backend} train.py --name ${name} --commit ${commit} --cfg ${cfg} --num_nodes ${nnodes}"
 echo $cmd
 eval $cmd
