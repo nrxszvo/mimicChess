@@ -36,13 +36,13 @@ do
 		cfg=${param[1]}
 	elif [[ ${param[0]} = "rdzv_endpoint" ]]
 	then
-		rdzv_endpoint=${{param[1]}}
+		rdzv_endpoint=${param[1]}
 	elif [[ ${param[0]} = "nnodes" ]]
 	then
-		nnodes=${{param[1]}}
+		nnodes=${param[1]}
 	elif [[ ${param[0]} = "node_rank" ]]
 	then
-		node_rank=${{param[1]}}
+		node_rank=${param[1]}
 	else
 		echo "didn't recognize ${var}" 
 		exit
