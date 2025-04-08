@@ -30,6 +30,6 @@ accumulate_grad_batches: 8
 opening_moves: 0
 effective_batch_size: 1024
 effective_max_steps: 7.7e+5 
-val_check_steps: 25000
+effective_val_check_steps: 25000
 strategy: ddp
 random_seed: 0

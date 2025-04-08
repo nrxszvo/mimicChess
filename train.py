@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import torch
+from torch.distributed import init_process_group, destroy_process_group
 
 from lib import init_modules, get_config
 
@@ -29,6 +30,11 @@ parser.add_argument(
     default=None,
     help="current commit associated with this version of codebase",
 )
+
+
+def ddp_init():
+    torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
+    init_process_group(backend='nccl')
 
 
 def main():
@@ -65,4 +71,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    ddp_init()
+    try:
+        main()
+    finally:
+        destroy_process_group()
