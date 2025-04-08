@@ -48,6 +48,6 @@ do
 		exit
 	fi
 done
-cmd="OMP_NUM_THREADS=${nthread} torchrun --nnodes ${nnodes} --node_rank ${node_rank} --nproc-per-node ${nproc} --rdzv_id ${rdzv_id} --rdzv_backend ${rdzv_backend} --rdzv_endpoint ${rdzv_endpoint} train.py --name ${name} --commit ${commit} --cfg ${cfg}"
+cmd="OMP_NUM_THREADS=${nthread} torchrun --nnodes ${nnodes} --node_rank ${node_rank} --nproc-per-node ${nproc} --rdzv_id ${rdzv_id} --rdzv_backend ${rdzv_backend} --rdzv_endpoint ${rdzv_endpoint} train.py --name ${name} --commit ${commit} --cfg ${cfg} --num_nodes ${nnodes}"
 echo $cmd
 eval $cmd

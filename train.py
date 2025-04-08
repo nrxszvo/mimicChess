@@ -30,6 +30,7 @@ parser.add_argument(
     default=None,
     help="current commit associated with this version of codebase",
 )
+parser.add_argument('--num_nodes', help='num nodes', default=1, type=int)
 
 
 def ddp_init():
@@ -55,6 +56,7 @@ def main():
         args.name,
         cfgyml.strategy,
         devices,
+        num_nodes=args.num_nodes,
         outdir=os.path.join(save_path, "ckpt"),
     )
 

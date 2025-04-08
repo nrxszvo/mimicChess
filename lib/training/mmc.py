@@ -31,6 +31,7 @@ class MMCModuleArgs:
     devices: Optional[int] = 0
     outdir: Optional[str] = None
     pretrain_cp: Optional[str] = None
+    num_nodes: Optiona[int] = 1
 
 
 class MimicChessModule(L.LightningModule):
@@ -58,6 +59,7 @@ class MimicChessModule(L.LightningModule):
             accelerator = "cpu"
 
         self.trainer_kwargs = {
+            'num_nodes': params.num_nodes,
             "logger": logger,
             "max_steps": params.max_steps,
             "val_check_interval": val_check_interval,

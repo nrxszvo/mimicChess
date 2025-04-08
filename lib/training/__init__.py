@@ -32,6 +32,7 @@ def init_modules(
     name,
     strategy,
     devices,
+    num_nodes=1,
     alt_datadir=None,
     n_samp=None,
     cp=None,
@@ -84,6 +85,7 @@ def init_modules(
         random_seed=cfgyml.random_seed,
         strategy=strategy,
         devices=devices,
+        num_nodes=num_nodes,
         outdir=outdir,
     )
     if hasattr(cfgyml, 'pretrain_cp'):
