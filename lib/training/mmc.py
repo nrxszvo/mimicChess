@@ -42,14 +42,15 @@ class MimicChessModule(L.LightningModule):
         L.seed_everything(params.random_seed, workers=True)
         self.model_args = params.model_args
         self.opening_moves = params.opening_moves
-        self.val_check_steps = params.val_check_steps
+        self.val_check_steps = params.val_check_steps*params.accumulate_grad_batches
         self.max_steps = params.max_steps
         self.elo_params = params.elo_params
         if params.name:
             logger = TensorBoardLogger(".", name="L", version=params.name)
         else:
             logger = None
-        val_check_interval = min(params.val_check_steps, params.max_steps)
+        val_check_interval = min(
+            self.val_check_steps, params.max_steps*params.accumulate_grad_batches)
         self.lr_scheduler_params = params.lr_scheduler_params
         if torch.cuda.is_available():
             precision = "bf16-mixed" if torch.cuda.is_bf16_supported() else 16

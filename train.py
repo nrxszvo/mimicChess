@@ -38,8 +38,7 @@ def ddp_init():
     init_process_group(backend='nccl')
 
 
-def main():
-    args = parser.parse_args()
+def main(args):
     cfgyml = get_config(args.cfg)
     cfgyml.commit = args.commit
 
@@ -63,7 +62,7 @@ def main():
     cfgyml.save(os.path.join(save_path, args.cfg))
     nweights, nflpweights = mmc.num_params()
     est_tflops = (
-        6 * nflpweights * cfgyml.effective_batch_size *
+        6 * nflpweights * cfgyml.global_batch_size *
         cfgyml.model_args.max_seq_len / 1e12
     )
     print(f"# model params: {nweights:.2e}")
@@ -73,9 +72,13 @@ def main():
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_sharing_strategy('file_system')
-    ddp_init()
-    try:
-        main()
-    finally:
-        destroy_process_group()
+    args = parser.parse_args()
+    if args.num_nodes > 1:
+        torch.multiprocessing.set_sharing_strategy('file_system')
+        ddp_init()
+        try:
+            main(args)
+        finally:
+            destroy_process_group()
+    else:
+        main(args)

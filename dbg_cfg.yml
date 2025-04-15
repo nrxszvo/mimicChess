@@ -25,11 +25,11 @@ lr_scheduler_params:
   lr: 3.e-4
   name: "WarmUpCosine"
   min_lr: 3.e-6
-  warmup_steps: 8000
-accumulate_grad_batches: 1
+  warmup_steps: 10 
+accumulate_grad_batches: 2
 opening_moves: 0
-effective_batch_size: 32 
-effective_max_steps: 10 
-effective_val_check_steps: 10 
+global_batch_size: 32 
+max_gradient_steps: 50 
+val_check_steps: 25 
 strategy: auto 
 random_seed: 0
