@@ -54,7 +54,7 @@ if [ "$OS_TYPE" = "aarch64" ]; then
 	conda install -y anaconda::python=3.10
 	sudo apt install gh
 	gh auth login --with-token < ~/.ghtoken
-	gh run download 14601397074 -R pytorch/pytorch --name manywheel-py3_10-cuda-aarch64-12_8
+	gh run download 13343007396 -R pytorch/pytorch --name manywheel-py3_10-cuda-aarch64
 	pip install $(ls *.whl) 
 	rm *.whl
 	#gh run download 12787463616 -R pytorch/vision --name pytorch_vision__3.10_cu126_aarch64
