@@ -1,23 +1,16 @@
-name: base 
-channels:
-  - pytorch
-  - nvidia
+name: base
 dependencies:
   - anaconda::python=3.10
-  - anaconda::numpy=1.26
-  - conda-forge::matplotlib
-  - anaconda::pyyaml
-  - conda-forge::chess
-  - pytorch
-  - torchvision
-  - torchaudio
-  - pytorch-cuda=12.4
-  - conda-forge::lightning
-  - conda-forge::tensorboard
-  - conda-forge::chess
-  - conda-forge::python-wget
   - anaconda::pip
   - pip:
       - autopep8
+      - numpy=1.26
+      - matplotlib
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch
+      - torchvision
+      - torchaudio
+      - lightning
       - fairscale
-
+      - tensorboard
+      - python-chess
