@@ -30,6 +30,7 @@ parser.add_argument('--plot', action='store_true',
                     help='generate pyplot plots')
 parser.add_argument('--title', default=None, help='plot title')
 
+parser.add_argument('--elo_edges', default=None, nargs='+', type=int, help='elo edges')
 
 def elo_matrix(
     welos,
@@ -285,7 +286,9 @@ if __name__ == "__main__":
     if args.elo_matrix or args.elo_hist:
         welos, belos = get_elos(blocks, fmdfn)
         kwargs = {'plot': args.plot, 'title': args.title}
-        if 'elo_edges' in blocks[0]:
+        if args.elo_edges:
+            kwargs['edges'] = args.elo_edges
+        elif 'elo_edges' in blocks[0]:
             kwargs['edges'] = blocks[0]['elo_edges']
         if args.elo_hist:
             elo_hist(welos, belos)
