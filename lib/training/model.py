@@ -12,21 +12,16 @@ from torch import nn
 
 @dataclass
 class ModelArgs:
-    dim: int = 4096
-    n_layers: int = 32
+    dim: int = 1024
+    n_layers: int = 16
     n_heads: int = 32
-    n_kv_heads: Optional[int] = None
+    n_kv_heads: Optional[int] = 8
     vocab_size: int = 2048
-    predict_move: bool = True
-    elo_pred_size: int = 10
-    gaussian_elo: bool = False
-    n_elo_heads: int = 10
-    n_timecontrol_heads: int = 1
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
-    ffn_dim_multiplier: Optional[float] = None
+    ffn_dim_multiplier: Optional[float] = 1.5
     norm_eps: float = 1e-5
-    rope_theta: float = 500000
-    max_seq_len: int = 512
+    rope_theta: float = 10000
+    max_seq_len: int = 128
 
     def __init__(self, paramd):
         self.__dict__ = paramd
@@ -256,33 +251,7 @@ class Transformer(nn.Module):
             self.layers.append(TransformerBlock(layer_id, params))
 
         self.norm = RMSNorm(params.dim, eps=params.norm_eps)
-        tcdim = params.n_timecontrol_heads * params.dim
-        self.preproc = nn.Linear(params.dim, tcdim, bias=False)
-
-        if params.elo_pred_size > 0:
-            self.elo_heads = nn.ModuleList()
-            for _ in range(params.n_timecontrol_heads):
-                self.elo_heads.append(EloHead(params))
-
-        if params.predict_move:
-            if params.n_elo_heads > 1:
-                self.white_heads = nn.ModuleList()
-                self.black_heads = nn.ModuleList()
-                for _ in range(params.n_timecontrol_heads):
-                    welo_heads = nn.ModuleList()
-                    belo_heads = nn.ModuleList()
-                    for _ in range(params.n_elo_heads):
-                        welo_heads.append(MoveHead(params))
-                        belo_heads.append(MoveHead(params))
-                    self.white_heads.append(welo_heads)
-                    self.black_heads.append(belo_heads)
-            else:
-                self.move_heads = nn.ModuleList()
-                for _ in range(params.n_timecontrol_heads):
-                    elo_heads = nn.ModuleList()
-                    for _ in range(params.n_elo_heads):
-                        elo_heads.append(MoveHead(params))
-                    self.move_heads.append(elo_heads)
+        self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
 
         self.freqs_cis = precompute_freqs_cis(
             params.dim // params.n_heads,
@@ -290,38 +259,6 @@ class Transformer(nn.Module):
             params.rope_theta,
         )
 
-    def _reshape_timecontrol(self, h):
-        bs, seqlen, _ = h.shape
-        h = h.reshape(bs, seqlen, self.params.n_timecontrol_heads, -1)
-        return h
-
-    def _get_elo_pred(self, h: torch.Tensor):
-        if self.params.elo_pred_size > 0:
-            h_outs = []
-            for i in range(self.params.n_timecontrol_heads):
-                h_out = self.elo_heads[i](h[:, :, i])
-                h_outs.append(h_out)
-            return torch.stack(h_outs, 2)
-        else:
-            return None
-
-    def _get_move_pred(self, h: torch.Tensor):
-        if self.params.predict_move:
-            tc_outs = []
-            for i in range(self.params.n_timecontrol_heads):
-                elo_outs = []
-                for j in range(self.params.n_elo_heads):
-                    if self.params.n_elo_heads > 1:
-                        w_out = self.white_heads[i][j](h[:, :, i])
-                        b_out = self.black_heads[i][j](h[:, :, i])
-                        elo_outs.append(torch.stack([w_out, b_out], dim=2))
-                    else:
-                        h_out = self.move_heads[i][j](h[:, :, i, None])
-                        elo_outs.append(h_out)
-                tc_outs.append(torch.stack(elo_outs, dim=2))
-            return torch.stack(tc_outs, dim=2)
-        else:
-            return None
 
     def forward(self, tokens: torch.Tensor, start_pos: int = 0):
         _, seqlen = tokens.shape
@@ -339,7 +276,4 @@ class Transformer(nn.Module):
         for layer in self.layers:
             h = layer(h, start_pos, freqs_cis, mask)
         h = self.norm(h)
-
-        h = F.silu(self.preproc(h))
-        h = self._reshape_timecontrol(h)
-        return self._get_move_pred(h), self._get_elo_pred(h)
+        return self.output(h)

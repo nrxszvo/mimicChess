@@ -1,20 +1,10 @@
 datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_inf_tc600
-elo_params:
-  predict: True
-  loss: gaussian_nll 
-  initial_var: 1
-  warmup_elo_steps: 0
-  warmup_var_steps: 0
-  weight: 1
-  edges: [4000]
-tc_groups: 
-  10800: [1000]
+elo_groups: [1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,4000]
 model_args:
-  predict_move: True
   dim: 2048 
   n_layers: 16
   n_heads: 32
-  n_kv_heads:  
+  n_kv_heads: 8
   vocab_size: 2048
   multiple_of: 256
   ffn_dim_multiplier: 1.5 
@@ -27,9 +17,8 @@ lr_scheduler_params:
   min_lr: 3.e-6
   warmup_steps: 25000
 accumulate_grad_batches: 8
-opening_moves: 0
-global_batch_size: 128
+global_batch_size: 1024
 max_gradient_steps: 7.7e+5 
 val_check_steps: 25000
-strategy: fsdp 
+strategy: ddp 
 random_seed: 0

@@ -49,10 +49,18 @@ def elo_matrix(
 
     H, w_edges, b_edges = np.histogram2d(welos, belos, bins=(edges, edges))
 
+    nedge = H.shape[0]
+    Hfull = H.copy()
+    for i in range(nedge):
+        for j in range(nedge):
+            if i != j:
+                Hfull[i, j] += H[j, i]
+    T = np.tril(Hfull)
+
     if plot:
         fig, ax = plt.subplots()
         ax.tick_params(axis='both', labelsize=7)
-        plot = ax.pcolormesh(np.log10(H.T), cmap="rainbow")
+        plot = ax.pcolormesh(np.log10(H), cmap="rainbow")
 
         cbar = fig.colorbar(plot)
         tick_labels = [
@@ -77,10 +85,15 @@ def elo_matrix(
         plt.tight_layout()
         plt.savefig("elo_matrix.png", dpi=500)
 
-    for i, row in reversed(list(enumerate(H))):
+    for i, row in reversed(list(enumerate(T))):
+
         print(str(int(w_edges[i + 1])).rjust(spacing), end="")
-        for c in row:
-            print(str(int(c)).rjust(spacing), end="")
+        for j, c in enumerate(row):
+            if j <= i:
+                v = f'{c:.1e}'
+                print(v.rjust(spacing), end="")
+            else:
+                print(' '.rjust(spacing), end='')
         print()
     print("".rjust(spacing), end="")
     for e in b_edges[1:]:
