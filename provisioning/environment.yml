@@ -2,15 +2,15 @@ name: base
 dependencies:
   - anaconda::python=3.10
   - anaconda::pip
+  - conda-forge::tensorboard
+  - conda-forge::matplotlib
   - pip:
       - autopep8
-      - numpy==1.26
-      - matplotlib
+      - numpy
       - --extra-index-url https://download.pytorch.org/whl/cu128
       - torch
       - torchvision
       - torchaudio
       - lightning
       - fairscale
-      - tensorboard
       - python-chess

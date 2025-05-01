@@ -178,15 +178,15 @@ class MimicChessModule(L.LightningModule):
 
         self.log("valid_loss", valid_loss, sync_dist=True)
 
-        total_moves = 0
-        total_legal_moves = 0
-        _, _, preds = self.get_top_5_moves(move_pred[:,1:].permute(0,2,1))
-        for pred, tgt in zip(preds, batch["move_target"]):
-            nmoves, nfails, _ = count_invalid(pred.cpu().numpy(), [], tgt.cpu().numpy())
-            total_moves += nmoves
-            total_legal_moves += nmoves - nfails[0]
+        #total_moves = 0
+        #total_legal_moves = 0
+        #_, _, preds = self.get_top_5_moves(move_pred[:,1:].permute(0,2,1))
+        #for pred, tgt in zip(preds, batch["move_target"]):
+        #    nmoves, nfails, _ = count_invalid(pred.cpu().numpy(), [], tgt.cpu().numpy())
+        #    total_moves += nmoves
+        #    total_legal_moves += nmoves - nfails[0]
 
-        self.log('valid_legal_prob', total_legal_moves/total_moves, sync_dist=True)
+        #self.log('valid_legal_prob', total_legal_moves/total_moves, sync_dist=True)
 
         return valid_loss
 
