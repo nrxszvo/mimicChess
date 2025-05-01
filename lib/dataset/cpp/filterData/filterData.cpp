@@ -284,7 +284,7 @@ public:
 			if (md == nullptr) { 
 				std::lock_guard<std::mutex> lock(histoMtx);
 				for (int i=0; i<eloHist.size(); i++) {
-					for (int j=0; j<eloHist.size(); j++) {
+					for (int j=0; j<=i; j++) {
 						eloHist[i][j] += localEloHist[i][j];
 					}
 				}
@@ -302,7 +302,9 @@ public:
 
 			int wbin = getEloBin(md->welo, eloEdges);
 			int bbin = getEloBin(md->belo, eloEdges);
-			if (maxGames > 0 && eloHist[wbin][bbin] >= maxGames) continue;
+			int first = std::max(wbin,bbin);
+			int second = std::min(wbin,bbin);
+			if (maxGames > 0 && eloHist[first][second] >= maxGames) continue;
 
 			int minTime = std::max(0, static_cast<int>(minTimeP*(md->timeCtl - 10*md->inc)));
 			int nMoves;
@@ -311,12 +313,12 @@ public:
 			}
 
 			if (nMoves >= minMoves) {
-				localEloHist[wbin][bbin]++;
+				localEloHist[first][second]++;
 				localTCHist[md->timeCtl][md->inc]++;
 				if (maxGames > 0 && blockGames[threadId] % leniency == 0) {
 					std::lock_guard<std::mutex> lock(histoMtx);
 					for (int i=0; i<eloHist.size(); i++) {
-						for (int j=0; j<eloHist.size(); j++) {
+						for (int j=0; j<=i; j++) {
 							eloHist[i][j] += localEloHist[i][j];
 							localEloHist[i][j] = 0;
 						}

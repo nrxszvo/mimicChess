@@ -1,7 +1,7 @@
-datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_inf_tc600
+datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_20m_tc600
 elo_groups: [1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,4000]
 model_args:
-  dim: 2048 
+  dim: 1024 
   n_layers: 16
   n_heads: 32
   n_kv_heads: 8
@@ -16,9 +16,9 @@ lr_scheduler_params:
   name: "WarmUpCosine"
   min_lr: 3.e-6
   warmup_steps: 25000
-accumulate_grad_batches: 8
+accumulate_grad_batches: 4 
 global_batch_size: 1024
 max_gradient_steps: 7.7e+5 
-val_check_steps: 25000
+val_check_steps: 10
 strategy: ddp 
 random_seed: 0

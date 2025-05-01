@@ -24,7 +24,7 @@ class ModelArgs:
     max_seq_len: int = 128
 
     def __init__(self, paramd):
-        self.__dict__ = paramd
+        self.__dict__ = paramd.copy()
 
 
 class RMSNorm(torch.nn.Module):

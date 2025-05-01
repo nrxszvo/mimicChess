@@ -17,9 +17,9 @@ def init_worker(seed):
 def collate_fn(batch):
     maxinp = 0
     for d in batch:
-        maxinp = max(maxinp, d["nmoves"])
+        maxinp = max(maxinp, d["input"].shape[0])
 
-    maxtgt = maxinp - 2
+    maxtgt = maxinp - 1
     bs = len(batch)
     inputs = torch.full((bs, maxinp), NOOP, dtype=torch.int32)
     move_targets = torch.full((bs, maxtgt), NOOP, dtype=torch.int64)

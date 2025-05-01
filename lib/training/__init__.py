@@ -38,18 +38,16 @@ def init_modules(
     dm = MMCDataModule(
         datadir=datadir,
         elo_edges=cfgyml.elo_groups,
-        mvid_offset=cfgyml.vocab_size,
+        mvid_offset=cfgyml.model_args.vocab_size,
         max_seq_len=model_args.max_seq_len,
         batch_size=batch_size,
         num_workers=n_workers,
         max_testsamp=n_samp,
-        opening_moves=cfgyml.opening_moves,
     )
 
     module_args = MMCModuleArgs(
         name=name,
         model_args=model_args,
-        opening_moves=dm.opening_moves,
         lr_scheduler_params=cfgyml.lr_scheduler_params,
         max_steps=cfgyml.max_gradient_steps,
         val_check_steps=cfgyml.val_check_steps,

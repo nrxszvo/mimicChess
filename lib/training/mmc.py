@@ -14,13 +14,13 @@ from torch.optim.lr_scheduler import (
 
 from .mmcdataset import NOOP
 from .model import ModelArgs, Transformer
+from ..pgnutils.reconstruct import count_invalid
 
 
 @dataclass
 class MMCModuleArgs:
     name: str
     model_args: ModelArgs
-    opening_moves: int
     lr_scheduler_params: Any
     max_steps: int
     val_check_steps: int
@@ -40,7 +40,6 @@ class MimicChessModule(L.LightningModule):
         self.params = params
         L.seed_everything(params.random_seed, workers=True)
         self.model_args = params.model_args
-        self.opening_moves = params.opening_moves
         self.val_check_steps = params.val_check_steps*params.accumulate_grad_batches
         self.max_steps = params.max_steps
         if params.name:
@@ -74,12 +73,12 @@ class MimicChessModule(L.LightningModule):
             self.trainer_kwargs["callbacks"].append(
                 ModelCheckpoint(
                     dirpath=params.outdir,
-                    filename=params.name + "-{valid_move_loss:.2f}",
-                    monitor="valid_move_loss",
+                    filename=params.name + "-{valid_loss:.2f}",
+                    monitor="valid_loss",
                 )
             )
 
-        self._init_model(params.pretrain_cp)
+        self._init_model()
         self.trainer = L.Trainer(**self.trainer_kwargs)
 
     def _init_model(self):
@@ -145,7 +144,7 @@ class MimicChessModule(L.LightningModule):
         return self.model(tokens)
 
     def _get_loss(self, move_pred, batch):
-        move_pred = move_pred[:, 2:].permute(0,2,1)
+        move_pred = move_pred[:, 1:].permute(0,2,1)
         loss = F.cross_entropy(
             move_pred, batch["move_target"], ignore_index=NOOP)
         return loss
@@ -161,6 +160,13 @@ class MimicChessModule(L.LightningModule):
         self.log("lr", cur_lr, prog_bar=True, sync_dist=True)
         return loss
 
+    def get_top_5_moves(self, move_pred):
+        probs = torch.softmax(move_pred, dim=1)
+        sprobs, smoves = torch.sort(probs, dim=1, descending=True)
+        sprobs = sprobs[:, :5]
+        smoves = smoves[:, :5]
+        return probs, sprobs, smoves
+
     def validation_step(self, batch, batch_idx):
         move_pred = self(batch["input"])
         valid_loss = self._get_loss(
@@ -171,6 +177,17 @@ class MimicChessModule(L.LightningModule):
             raise Exception("Loss is NaN, training stopped.")
 
         self.log("valid_loss", valid_loss, sync_dist=True)
+
+        total_moves = 0
+        total_legal_moves = 0
+        _, _, preds = self.get_top_5_moves(move_pred[:,1:].permute(0,2,1))
+        for pred, tgt in zip(preds, batch["move_target"]):
+            nmoves, nfails, _ = count_invalid(pred.cpu().numpy(), [], tgt.cpu().numpy())
+            total_moves += nmoves
+            total_legal_moves += nmoves - nfails[0]
+
+        self.log('valid_legal_prob', total_legal_moves/total_moves, sync_dist=True)
+
         return valid_loss
 
     def predict_step(self, batch, batch_idx):
@@ -186,14 +203,8 @@ class MimicChessModule(L.LightningModule):
                 npd[k] = v
             return npd
 
-        def get_top_5_moves(move_pred):
-            probs = torch.softmax(move_pred, dim=1)
-            sprobs, smoves = torch.sort(probs, dim=1, descending=True)
-            sprobs = sprobs[:, :5]
-            smoves = smoves[:, :5]
-            return probs, sprobs, smoves
 
-        fmt_probs, fmt_top_probs, fmt_top_moves = get_top_5_moves(move_pred)
+        fmt_probs, fmt_top_probs, fmt_top_moves = self.get_top_5_moves(move_pred)
 
         tgts = batch["move_target"]
         mask = F.one_hot(tgts, fmt_probs.shape[1]).permute(0, 2, 1)
@@ -203,7 +214,6 @@ class MimicChessModule(L.LightningModule):
             "sorted_tokens": fmt_top_moves,
             "sorted_probs": fmt_top_probs,
             "target_probs": fmt_tgt_probs,
-            "openings": batch["opening"],
             "targets": tgts,
             "loss": move_loss.item(),
         })

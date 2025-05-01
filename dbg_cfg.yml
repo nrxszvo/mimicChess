@@ -1,16 +1,6 @@
-datadir: datasets/debug/filtered
-elo_params:
-  predict: True
-  loss: gaussian_nll
-  initial_var: 1.e-1
-  warmup_var_steps: 0 
-  warmup_elo_steps: 0   
-  weight: 1
-  edges: [4000]
-tc_groups: 
- 10800: [1000]
+datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_20m_tc600
+elo_groups: [1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,4000]
 model_args:
-  predict_move: True
   dim: 64 
   n_layers: 16 
   n_heads: 32
@@ -27,7 +17,6 @@ lr_scheduler_params:
   min_lr: 3.e-6
   warmup_steps: 10 
 accumulate_grad_batches: 2
-opening_moves: 0
 global_batch_size: 32 
 max_gradient_steps: 50 
 val_check_steps: 25 
