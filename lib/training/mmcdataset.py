@@ -5,7 +5,8 @@ from collections import OrderedDict
 import lightning as L
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset, DataLoader
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 from ..pgnutils import NOOP
 
@@ -210,6 +211,7 @@ class MMCDataModule(L.LightningDataModule):
         # model must see before making its first prediction
         self.max_testsamp = max_testsamp
 
+
     def setup(self, stage):
         if stage == "fit":
             self.trainset = MMCDataset(
@@ -246,7 +248,7 @@ class MMCDataModule(L.LightningDataModule):
             )
 
     def train_dataloader(self):
-        return DataLoader(
+        return StatefulDataLoader(
             self.trainset,
             collate_fn=collate_fn,
             batch_size=self.batch_size,

@@ -18,7 +18,7 @@ lr_scheduler_params:
   warmup_steps: 25000
 accumulate_grad_batches: 4 
 global_batch_size: 1024
-max_gradient_steps: 7.7e+5 
+max_epochs: 1
 val_check_steps: 25000
 strategy: ddp 
 random_seed: 0

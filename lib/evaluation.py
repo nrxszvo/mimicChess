@@ -8,21 +8,19 @@ from multiprocessing import Queue, Process
 from .training.mmcdataset import NOOP
 from .pgnutils.reconstruct import count_invalid
 
-SINGLE_THREAD = False
-
 
 class LegalGameStats:
     @staticmethod
     def eval_game(gameq, resultq):
         while True:
-            pred, opn, tgt = gameq.get()
+            pred, tgt = gameq.get()
             if pred is None:
                 break
-            nmoves, nfails, reasons = count_invalid(pred, opn, tgt)
+            nmoves, nfails, reasons = count_invalid(pred, tgt)
             nvalid_moves = nmoves - nfails[0]
             resultq.put((nvalid_moves, nmoves, nfails, reasons))
 
-    def __init__(self, nproc=os.cpu_count()-1):
+    def __init__(self, nproc=os.cpu_count()-1, single_thread=False):
         self.nvalid_games = [0]
         self.ntotal_games = 0
         self.nvalid_moves = 0
@@ -31,7 +29,8 @@ class LegalGameStats:
         self.gameq = Queue()
         self.resultq = Queue()
         self.procs = []
-        if not SINGLE_THREAD:
+        self.single_thread = single_thread
+        if not self.single_thread:
             for _ in range(nproc):
                 p = Process(
                     target=LegalGameStats.eval_game, args=(
@@ -41,13 +40,13 @@ class LegalGameStats:
                 p.start()
                 self.procs.append(p)
 
-    def eval(self, tokens, opening, tgts):
+    def eval(self, tokens, tgts):
         self.ntotal_games += tokens.shape[0]
         ngames = len(tokens)
-        for game in zip(tokens, opening, tgts):
-            if SINGLE_THREAD:
-                pred, opn, tgt = game
-                nmoves, nfails, reasons = count_invalid(pred, opn, tgt)
+        for game in zip(tokens, tgts):
+            if self.single_thread:
+                pred, tgt = game
+                nmoves, nfails, reasons = count_invalid(pred, tgt)
                 nvalid_moves = nmoves - nfails[0]
                 self.nvalid_moves += nvalid_moves
                 self.ntotal_moves += nmoves
@@ -60,8 +59,8 @@ class LegalGameStats:
             else:
                 self.gameq.put(game)
 
-        if not SINGLE_THREAD:
-            for _ in range(ngames):
+        if not self.single_thread:
+            for i in range(ngames):
                 nvalid_moves, nmoves, nfails, reasons = self.resultq.get()
                 self.nvalid_moves += nvalid_moves
                 self.ntotal_moves += nmoves
@@ -74,7 +73,7 @@ class LegalGameStats:
 
     def __del__(self):
         for _ in range(len(self.procs)):
-            self.gameq.put((None, None, None))
+            self.gameq.put((None, None))
         for p in self.procs:
             p.join()
 

@@ -11,6 +11,7 @@ dependencies:
       - torch
       - torchvision
       - torchaudio
+      - torchdata
       - lightning
       - fairscale
       - python-chess

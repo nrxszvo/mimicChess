@@ -17,6 +17,7 @@ class ModelArgs:
     n_heads: int = 32
     n_kv_heads: Optional[int] = 8
     vocab_size: int = 2048
+    n_elo_groups: int = 12
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
     ffn_dim_multiplier: Optional[float] = 1.5
     norm_eps: float = 1e-5
@@ -212,31 +213,6 @@ class TransformerBlock(nn.Module):
         return out
 
 
-class EloHead(nn.Module):
-    def __init__(self, params: ModelArgs):
-        super().__init__()
-        self.params = params
-        self.norm = RMSNorm(params.dim, eps=params.norm_eps)
-        self.output = nn.Linear(params.dim, params.elo_pred_size, bias=False)
-
-    def forward(self, h):
-        h = self.output(self.norm(h)).float()
-        if self.params.gaussian_elo:
-            # make sure variance is non-negative
-            h[:, :, 1] = torch.exp(h[:, :, 1])
-        return h
-
-
-class MoveHead(nn.Module):
-    def __init__(self, params: ModelArgs):
-        super().__init__()
-        self.norm = RMSNorm(params.dim, eps=params.norm_eps)
-        self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
-
-    def forward(self, h: torch.Tensor):
-        return self.output(self.norm(h)).float()
-
-
 class Transformer(nn.Module):
     def __init__(self, params: ModelArgs):
         super().__init__()
@@ -244,7 +220,7 @@ class Transformer(nn.Module):
         self.vocab_size = params.vocab_size
         self.n_layers = params.n_layers
 
-        self.tok_embeddings = nn.Embedding(params.vocab_size, params.dim)
+        self.tok_embeddings = nn.Embedding(params.vocab_size+params.n_elo_groups, params.dim)
 
         self.layers = torch.nn.ModuleList()
         for layer_id in range(params.n_layers):

@@ -10,7 +10,7 @@ from .model import ModelArgs
 
 def get_model_args(cfgyml):
     model_args = ModelArgs(cfgyml.model_args.__dict__)
-    model_args.vocab_size += len(cfgyml.elo_groups)
+    model_args.n_elo_groups = len(cfgyml.elo_groups)
     return model_args
 
 
@@ -38,18 +38,18 @@ def init_modules(
     dm = MMCDataModule(
         datadir=datadir,
         elo_edges=cfgyml.elo_groups,
-        mvid_offset=cfgyml.model_args.vocab_size,
+        mvid_offset=model_args.vocab_size,
         max_seq_len=model_args.max_seq_len,
         batch_size=batch_size,
         num_workers=n_workers,
         max_testsamp=n_samp,
     )
-
+    max_steps = int(0.5 + cfgyml.max_epochs*dm.fmd['train_shape'][0]/batch_size)
     module_args = MMCModuleArgs(
         name=name,
         model_args=model_args,
         lr_scheduler_params=cfgyml.lr_scheduler_params,
-        max_steps=cfgyml.max_gradient_steps,
+        max_steps=max_steps,
         val_check_steps=cfgyml.val_check_steps,
         accumulate_grad_batches=cfgyml.accumulate_grad_batches,
         random_seed=cfgyml.random_seed,
