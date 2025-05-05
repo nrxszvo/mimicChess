@@ -142,17 +142,17 @@ void processGames(ProcessorState ps, int nReaders, bool requireClk) {
 			}
 		} else {
 			try {
-				auto [mvids, clk] = parseMoves(gd->moveStr, requireClk);
-				auto errs = validateGame(gd->gameId, gd->moveStr, mvids);
+				auto mvs = parseMoves(gd->moveStr, requireClk);
+				//auto errs = validateGame(gd->gameId, gd->moveStr, mvids);
 				{
 					std::lock_guard<std::mutex> lock(*ps.outputMtx);
-					if (errs.empty()) {
+					//if (errs.empty()) {
 						ps.outputQ->push(
-								std::make_shared<MoveData>(gd->pid, gd, mvids, clk)
+								std::make_shared<MoveData>(gd->pid, gd, mvs)
 								);
-					} else {
-						ps.outputQ->push(std::make_shared<MoveData>(errs));
-					}
+					//} else {
+					//	ps.outputQ->push(std::make_shared<MoveData>(errs));
+					//}
 					ps.outputCv->notify_one();
 				}
 			} catch(std::exception &e) {
@@ -253,9 +253,7 @@ std::shared_ptr<ParserOutput> ParallelParser::parse(std::string zst, std::string
 			output->belos.push_back(md->belo);
 			output->timeCtl.push_back(md->time);
 			output->increment.push_back(md->inc);
-			output->gamestarts.push_back(output->mvids.size());
-			output->mvids.insert(output->mvids.end(), md->mvids.begin(), md->mvids.end());
-			output->clk.insert(output->clk.end(), md->clk.begin(), md->clk.end());
+			output->mvs.push_back(md->mvs);
 			ngames++;
 			
 			int totalGamesEst = ngames / md->progress;

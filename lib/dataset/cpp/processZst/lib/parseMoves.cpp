@@ -9,22 +9,21 @@
 
 using namespace std;
 
-const string MV_PAT = "(O-O-O|O-O|[a-hRNBQK]+[0-9=x]*[a-hRNBQK]*[0-9]*[=RNBQ]*)";
-const string CLK_PAT = "\\{.*\\[%clk ([0-9:]+)\\].*\\}";
-const string EVAL_PAT = "(?:\\? \\{.*Mistake.*\\})?";
+const string MV_PAT = "(O-O-O\\+?#?|O-O\\+?#?|[a-hRNBQK]+[0-9=x]*[a-hRNBQK]*[0-9]*[=RNBQ+#]*)\\??\\??\\!?";
+const string CLK_PAT = "(?:\\{ (?:\\[%eval [0-9.\\-#]+\\] )?\\[%clk ([0-9:]+)\\] \\})";
 const string ALT_LINE_PAT = "(?:\\([0-9]+\\.[0-9a-hRNBQK]*\\))?";
+const string NUM_PAT = "[0-9]+\\.";
+const string NUM_ALT_PAT = "(?:" + NUM_PAT + "\\.\\.)?";
+const string RESULT_PAT = ".*(1/2-1/2|0-1|1-0)";
 
-const std::string oneMoveStr = "[0-9]+\\.+ " + MV_PAT + ".*" + EVAL_PAT + ".*" + CLK_PAT + ".*" + ALT_LINE_PAT + ".*";
-const re2::RE2 oneMove(oneMoveStr);
-const re2::RE2 twoMoves(oneMoveStr + oneMoveStr);
-const re2::RE2 twoMovesNoClk("\\..* (" + MV_PAT + ").* (" + MV_PAT + ").*");
-const re2::RE2 oneMoveNoClk("\\.* (" + MV_PAT + ").*");
+const re2::RE2 oneMove(NUM_PAT + " " + MV_PAT + " " + CLK_PAT);
+const re2::RE2 twoMoves(NUM_PAT + " " + MV_PAT + " " + CLK_PAT + " ?" + NUM_ALT_PAT + " ?" + MV_PAT + " " + CLK_PAT);
 
 string movenoToStr(int moveno) {
 	return to_string(moveno) + ". ";
 }
 
-std::string nextMoveStr(std::string& moveStr, int& idx, int curmv) {
+string nextMoveStr(string& moveStr, int& idx, int curmv) {
 	int mvstart = idx;
 	string nextmv = movenoToStr(curmv+1);
 
@@ -47,78 +46,66 @@ std::string nextMoveStr(std::string& moveStr, int& idx, int curmv) {
 		idx++;
 	}
 
-	string wm, wclk, bm, bclk;
 	string ss = moveStr.substr(mvstart, idx-mvstart);
 	return ss;
 }
 
 tuple<int, vector<string> > matchNextMove(string& moveStr, int idx, int curmv, bool requireClk) {
 	string ss = nextMoveStr(moveStr, idx, curmv);
-	string wm, wclk, bm, bclk;
+	string wm, bm, wclk="", bclk="";
 
 	profiler.start("regex");
-	bool found1=false, found2noclk=false, found1noclk=false;
 	bool found2 = re2::RE2::PartialMatch(ss, twoMoves, &wm, &wclk, &bm, &bclk);
 	if (!found2) {
-		found1 = re2::RE2::PartialMatch(ss, oneMove, &wm, &wclk);
-		if (!found1 && !requireClk) {
-			found2noclk = re2::RE2::PartialMatch(ss, twoMovesNoClk, &wm, &bm);
-			if (!found2noclk) {
-				found1noclk = re2::RE2::PartialMatch(ss, oneMoveNoClk, &wm);
-			}
-		}
+		re2::RE2::PartialMatch(ss, oneMove, &wm, &wclk);
 	}
 	profiler.stop("regex");
 
 	vector<string> matches;
 	if (found2) {
 		matches = {wm, wclk, bm, bclk};
-	} else if (found1) {
+	} else {
 		matches = {wm, wclk};
-	} else if (found2noclk) {
-		matches = {wm, "0:00:00", bm, "0:00:00"};
-	} else if (found1noclk) {
-		matches = {wm, "0:00:00"};
 	} 
 	return make_tuple(idx, matches);
 }
 
-int clkToSec(string timeStr) {
+string clkToSec(string timeStr) {
 	int m = stoi(timeStr.substr(2, 2));
 	int s = stoi(timeStr.substr(5, 2));
-	return (int16_t)(m * 60 + s);
+	return to_string(m * 60 + s);
 }
 
-tuple<vector<int16_t>, vector<int16_t> > parseMoves(string moveStr, bool requireClk) {
-	vector<int16_t> mvids;
-	vector<int16_t> clk;
+string parseMoves(string moveStr, bool requireClk) {
+	string mvs = "";
+	string result = "";
 	int curmv = 1;
 	int idx = 0;
 	vector<string> matches;
-	MoveParser parser;
 	
 	while (idx < moveStr.size()) {
 		profiler.start("matchNextMove");
 		tie(idx, matches) = matchNextMove(moveStr, idx, curmv, requireClk);
 		profiler.stop("matchNextMove");
 
+		if (idx == moveStr.size()) {
+			re2::RE2::PartialMatch(moveStr.substr(idx-7,7), RESULT_PAT, &result);
+		}
+
 		if (matches.size() == 0) {
 			break;
 		}
-		string wm = matches[0];
-		profiler.start("inferId");
-		mvids.push_back(parser.inferId(wm));
-		profiler.stop("inferId");
 
-		clk.push_back(clkToSec(matches[1]));
+		mvs += clkToSec(matches[1]) + " ";
+		mvs += matches[0] + " ";
 		if (matches.size() == 4) {
-			string bm = matches[2];
-			mvids.push_back(parser.inferId(bm));
-			clk.push_back(clkToSec(matches[3]));
+			mvs += clkToSec(matches[3]) + " ";
+			mvs += matches[2] + " ";
 		}
 		curmv++;
 	}
-	return make_tuple(mvids, clk);
+	mvs += result;
+	return mvs;
 }
 
 const string TERM_PATS[] = {

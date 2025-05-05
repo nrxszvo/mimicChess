@@ -27,36 +27,32 @@ ABSL_FLAG(bool, allowNoClock, false, "Allow games with no clock time data to be 
 
 void writeNpy(std::string outdir, std::shared_ptr<ParserOutput> res) {
 
-	std::vector<int16_t> elos;
-	elos.insert(elos.begin(), res->welos.begin(), res->welos.end());
-	elos.insert(elos.begin() + res->welos.size(), res->belos.begin(), res->belos.end());
+	std::ofstream output_file(outdir + "/moves.data");
+    std::ostream_iterator<std::string> output_iterator(output_file, "\n");
+    std::copy(res->mvs.begin(), res->mvs.end(), output_iterator);
 
-	std::vector<int16_t> moves;
-	moves.insert(moves.begin(), res->mvids.begin(), res->mvids.end());
-	moves.insert(moves.begin() + res->mvids.size(), res->clk.begin(), res->clk.end());
-
-	std::vector<int16_t> timeData;
-	timeData.insert(timeData.begin(), res->timeCtl.begin(), res->timeCtl.end()); 
-	timeData.insert(timeData.begin()+res->timeCtl.size(), res->increment.begin(), res->increment.end()); 
-
-	npy::npy_data_ptr<int16_t> elo_ptr;
+	npy::npy_data_ptr<int16_t> welo_ptr;
+	npy::npy_data_ptr<int16_t> belo_ptr;
 	npy::npy_data_ptr<int64_t> gs_ptr; 
-	npy::npy_data_ptr<int16_t> mv_ptr;
-	npy::npy_data_ptr<int16_t> timeData_ptr;
+	npy::npy_data_ptr<int16_t> timeCtl_ptr;
+	npy::npy_data_ptr<int16_t> inc_ptr;
 	
-	elo_ptr.data_ptr = elos.data(); 	
-	elo_ptr.shape = { 2, res->welos.size() };
+	welo_ptr.data_ptr = res->welos.data(); 	
+	welo_ptr.shape = { res->welos.size() };
+	belo_ptr.data_ptr = res->belos.data();
+	belo_ptr.shape = { res->belos.size() };
 	gs_ptr.data_ptr = res->gamestarts.data();
 	gs_ptr.shape = { res->gamestarts.size() };
-	mv_ptr.data_ptr = moves.data();
-	mv_ptr.shape = { 2, res->mvids.size() };
-	timeData_ptr.data_ptr = timeData.data();
-	timeData_ptr.shape = { 2, res->timeCtl.size() };
+	timeCtl_ptr.data_ptr = res->timeCtl.data();
+	timeCtl_ptr.shape = { res->timeCtl.size() };
+	inc_ptr.data_ptr = res->increment.data();
+	inc_ptr.shape = { res->increment.size() };
 
-	npy::write_npy(outdir + "/elos.npy", elo_ptr);
+	npy::write_npy(outdir + "/welos.npy", welo_ptr);
+	npy::write_npy(outdir + "/belos.npy", belo_ptr);
 	npy::write_npy(outdir + "/gamestarts.npy", gs_ptr);
-	npy::write_npy(outdir + "/moves.npy", mv_ptr);
-	npy::write_npy(outdir + "/timeData.npy", timeData_ptr); 
+	npy::write_npy(outdir + "/timeCtl.npy", timeCtl_ptr);
+	npy::write_npy(outdir + "/inc.npy", inc_ptr);
 }
 
 int main(int argc, char *argv[]) {

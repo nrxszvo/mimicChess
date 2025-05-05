@@ -42,10 +42,9 @@ struct MoveData: Data {
 	MoveData(
 			int pid, 
 			std::shared_ptr<GameData> gd, 
-			std::vector<int16_t>& mvids, 
-			std::vector<int16_t>& clk
+			std::string mvs
 			) 
-		: Data(pid, gd), mvids(mvids), clk(clk) {
+		: Data(pid, gd), mvs(mvs) {
 		this->info = "GAME";
 	};
 	MoveData(std::vector<std::pair<int,std::string> >& errs) 
@@ -53,8 +52,7 @@ struct MoveData: Data {
 		this->info = "ERROR"; 
 	};
 
-	std::vector<int16_t> mvids;
-	std::vector<int16_t> clk;
+	std::string mvs;
 	std::vector<std::pair<int, std::string> > errs;
 };
 

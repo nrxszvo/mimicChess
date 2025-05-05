@@ -25,7 +25,7 @@ struct State {
 	};
 };
 
-std::tuple<std::vector<int16_t>, std::vector<int16_t> > parseMoves(std::string moveStr, bool requireClk=true);
+std::string parseMoves(std::string moveStr, bool requireClk=true);
 
 class PgnProcessor {
 public:
