@@ -13,5 +13,6 @@ dependencies:
       - torchaudio
       - torchdata
       - lightning
-      - fairscale
       - python-chess
+      - tokenizers
+      - pyarrow
