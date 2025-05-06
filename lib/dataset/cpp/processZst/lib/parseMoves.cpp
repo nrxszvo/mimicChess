@@ -10,7 +10,7 @@
 using namespace std;
 
 const string MV_PAT = "(O-O-O\\+?#?|O-O\\+?#?|[a-hRNBQK]+[0-9=x]*[a-hRNBQK]*[0-9]*[=RNBQ+#]*)\\??\\??\\!?";
-const string CLK_PAT = "(?:\\{ (?:\\[%eval [0-9.\\-#]+\\] )?\\[%clk ([0-9:]+)\\] \\})";
+const string CLK_PAT = "(?:\\{ (?:\\[%eval [0-9.\\-#]+\\] )?\\[%clk ([0-9:]+)\\] \\})?";
 const string ALT_LINE_PAT = "(?:\\([0-9]+\\.[0-9a-hRNBQK]*\\))?";
 const string NUM_PAT = "[0-9]+\\.";
 const string NUM_ALT_PAT = "(?:" + NUM_PAT + "\\.\\.)?";
@@ -96,10 +96,14 @@ string parseMoves(string moveStr, bool requireClk) {
 			break;
 		}
 
-		mvs += clkToSec(matches[1]) + " ";
+		if (matches[1] != "") {
+			mvs += clkToSec(matches[1]) + " ";
+		}
 		mvs += matches[0] + " ";
 		if (matches.size() == 4) {
-			mvs += clkToSec(matches[3]) + " ";
+			if (matches[3] != "") {
+				mvs += clkToSec(matches[3]) + " ";
+			}
 			mvs += matches[2] + " ";
 		}
 		curmv++;

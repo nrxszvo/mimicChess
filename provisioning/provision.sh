@@ -79,5 +79,5 @@ fi
 
 echo "set -g mouse on" > ${HOME}/.tmux.conf
 
-sudo apt-get install -y stockfish libzstd-dev clangd
+sudo apt-get install -y stockfish libzstd-dev clangd libarrow-dev libparquet-dev
 

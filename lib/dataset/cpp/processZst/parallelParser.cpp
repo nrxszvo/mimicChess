@@ -148,8 +148,8 @@ void processGames(ProcessorState ps, int nReaders, bool requireClk) {
 					std::lock_guard<std::mutex> lock(*ps.outputMtx);
 					//if (errs.empty()) {
 						ps.outputQ->push(
-								std::make_shared<MoveData>(gd->pid, gd, mvs)
-								);
+							std::make_shared<MoveData>(gd->pid, gd, mvs)
+						);
 					//} else {
 					//	ps.outputQ->push(std::make_shared<MoveData>(errs));
 					//}

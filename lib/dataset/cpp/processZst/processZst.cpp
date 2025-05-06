@@ -1,6 +1,7 @@
 #include <string>
 #include <iostream>
 #include <chrono>
+#include <filesystem>
 #include "npy.hpp"
 #include "parallelParser.h"
 #include "serialParser.h"
@@ -12,18 +13,83 @@
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
+#include <arrow/api.h>
+#include <arrow/io/file.h>
+#include <parquet/arrow/writer.h>
 
 ABSL_FLAG(std::string, zst, "", ".zst archive to decompress and parse");
 ABSL_FLAG(std::string, name, "", "human-readable name for archive");
 ABSL_FLAG(std::string, outdir, ".", "output directory to store npy output files");
 ABSL_FLAG(bool, serial, false, "Disable parallel processing");
 ABSL_FLAG(int, printFreq, 60, "Print status every printFreq seconds");
-ABSL_FLAG(int, nReaders, std::thread::hardware_concurrency()-1, "Number of zst/pgn readers for parallel processing");
-ABSL_FLAG(int, nMoveProcessors, 1, "Number of game parsers for parallel processing");
+ABSL_FLAG(int, nReaders, 2, "Number of zst/pgn readers for parallel processing");
+ABSL_FLAG(int, nMoveProcessors, std::thread::hardware_concurrency()-3, "Number of game parsers for parallel processing");
 ABSL_FLAG(int, minSec, 300, "Minimum time control for game in seconds");
 ABSL_FLAG(int, maxSec, 10800, "Maximum time control for game in seconds");
 ABSL_FLAG(int, maxInc, 60, "Maximum increment for game in seconds");
 ABSL_FLAG(bool, allowNoClock, false, "Allow games with no clock time data to be included");
+ABSL_FLAG(size_t, chunkSize, 100000, "Number of rows to write per chunk");
+
+arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<ParserOutput> res, size_t chunk_size) {
+    auto pool = arrow::default_memory_pool();
+	auto schema =
+		arrow::schema({arrow::field("moves", arrow::utf8()), arrow::field("welo", arrow::int16()),
+						arrow::field("belo", arrow::int16()),
+						arrow::field("timeCtl", arrow::int16()), arrow::field("increment", arrow::int16())});
+
+    std::shared_ptr<arrow::io::FileOutputStream> outfile;
+    PARQUET_ASSIGN_OR_THROW(outfile, arrow::io::FileOutputStream::Open(root_path + "/data.parquet"));
+
+    std::unique_ptr<parquet::arrow::FileWriter> parquet_writer;
+    ARROW_ASSIGN_OR_RAISE(parquet_writer, parquet::arrow::FileWriter::Open(*schema, pool, outfile));
+
+	size_t nRows = res->mvs.size();
+    for (size_t i=0; i<nRows; i+=chunk_size) {
+        auto mvstart = res->mvs.begin() + i;
+		auto mvend = res->mvs.begin() + i + chunk_size;
+		if (mvend > res->mvs.end()) {
+			mvend = res->mvs.end();
+		}
+		auto mvbatch = std::vector<std::string>(mvstart, mvend);
+        auto welop = res->welos.data() + i;
+        auto belop = res->belos.data() + i;
+        auto timeCtlp = res->timeCtl.data() + i;
+        auto incp = res->increment.data() + i;
+
+        std::shared_ptr<arrow::Array> moves;
+        std::shared_ptr<arrow::Array> welos;
+        std::shared_ptr<arrow::Array> belos;
+        std::shared_ptr<arrow::Array> timeCtl;
+        std::shared_ptr<arrow::Array> increment;
+
+        arrow::StringBuilder string_builder(pool);	
+        ARROW_RETURN_NOT_OK(string_builder.AppendValues(mvbatch));
+        ARROW_RETURN_NOT_OK(string_builder.Finish(&moves));
+
+		auto batch_size = std::min(chunk_size, nRows-i);
+        arrow::NumericBuilder<arrow::Int16Type> i16_builder(pool);	
+        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(welop, batch_size));
+        ARROW_RETURN_NOT_OK(i16_builder.Finish(&welos));
+        i16_builder.Reset();
+        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(belop, batch_size));
+        ARROW_RETURN_NOT_OK(i16_builder.Finish(&belos));
+        i16_builder.Reset();
+        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(timeCtlp, batch_size));
+        ARROW_RETURN_NOT_OK(i16_builder.Finish(&timeCtl));
+        i16_builder.Reset();
+        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(incp, batch_size));
+        ARROW_RETURN_NOT_OK(i16_builder.Finish(&increment));
+
+        auto batch = arrow::RecordBatch::Make(schema, batch_size, {moves, welos, belos, timeCtl, increment});
+        PARQUET_THROW_NOT_OK(parquet_writer->WriteRecordBatch(*batch));
+    }
+
+    PARQUET_THROW_NOT_OK(parquet_writer->Close());
+    PARQUET_THROW_NOT_OK(outfile->Close());
+
+    return root_path;
+}
+
 
 void writeNpy(std::string outdir, std::shared_ptr<ParserOutput> res) {
 
@@ -80,7 +146,12 @@ int main(int argc, char *argv[]) {
 			   	absl::GetFlag(FLAGS_printFreq)
 				);
 	}
-	writeNpy(absl::GetFlag(FLAGS_outdir), res);
+	std::string outdir = std::filesystem::absolute(absl::GetFlag(FLAGS_outdir)).string();
+	auto result = writeParquet(outdir, res, absl::GetFlag(FLAGS_chunkSize));
+	if (!result.ok()) {
+		std::cerr << "Error writing table: " << result.status() << std::endl;
+		return 1;
+	}
 	auto stop = std::chrono::high_resolution_clock::now();
 	std::cout << name << " finished parsing in " << getEllapsedStr(start, stop) << std::endl;
 	profiler.report();
