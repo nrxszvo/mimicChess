@@ -1,4 +1,4 @@
-add_library(PgnParser parseMoves.cpp inference.cpp validate.cpp decompress.cpp)
+add_library(PgnParser parseMoves.cpp decompress.cpp)
 target_link_libraries(Utils)
 target_include_directories(PgnParser PUBLIC "${PROJECT_SOURCE_DIR}")
 target_include_directories(PgnParser PUBLIC "${PROJECT_SOURCE_DIR}/..")

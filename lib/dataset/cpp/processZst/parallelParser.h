@@ -42,18 +42,17 @@ struct MoveData: Data {
 	MoveData(
 			int pid, 
 			std::shared_ptr<GameData> gd, 
-			std::string mvs
+			std::string mvs,
+			std::string clk,
+			uint8_t result
 			) 
-		: Data(pid, gd), mvs(mvs) {
+		: Data(pid, gd), mvs(mvs), clk(clk), result(result) {
 		this->info = "GAME";
-	};
-	MoveData(std::vector<std::pair<int,std::string> >& errs) 
-		: errs(errs) { 
-		this->info = "ERROR"; 
 	};
 
 	std::string mvs;
-	std::vector<std::pair<int, std::string> > errs;
+	std::string clk;
+	uint8_t result;
 };
 
 class ParallelParser {
@@ -73,5 +72,5 @@ class ParallelParser {
 public:
 	ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc);
 	~ParallelParser();
-	std::shared_ptr<ParserOutput> parse(std::string zst, std::string name, bool requireClk, int printFreq=60);
+	std::shared_ptr<ParserOutput> parse(std::string zst, std::string name, int printFreq=60);
 };

@@ -4,7 +4,6 @@
 #include <re2/re2.h>
 #include <tuple>
 #include "parseMoves.h"
-#include "inference.h"
 #include "profiling/profiler.h"
 
 using namespace std;
@@ -16,8 +15,7 @@ const string NUM_PAT = "[0-9]+\\.";
 const string NUM_ALT_PAT = "(?:" + NUM_PAT + "\\.\\.)?";
 const string RESULT_PAT = ".*(1/2-1/2|0-1|1-0)";
 
-const re2::RE2 oneMove(NUM_PAT + " " + MV_PAT + " " + CLK_PAT);
-const re2::RE2 twoMoves(NUM_PAT + " " + MV_PAT + " " + CLK_PAT + " ?" + NUM_ALT_PAT + " ?" + MV_PAT + " " + CLK_PAT);
+const re2::RE2 twoMoves(NUM_PAT + " " + MV_PAT + " " + CLK_PAT + " ?" + NUM_ALT_PAT + " ?" + "(?:" + MV_PAT + ")? ?" + CLK_PAT);
 
 string movenoToStr(int moveno) {
 	return to_string(moveno) + ". ";
@@ -50,66 +48,55 @@ string nextMoveStr(string& moveStr, int& idx, int curmv) {
 	return ss;
 }
 
-tuple<int, vector<string> > matchNextMove(string& moveStr, int idx, int curmv, bool requireClk) {
-	string ss = nextMoveStr(moveStr, idx, curmv);
-	string wm, bm, wclk="", bclk="";
-
-	profiler.start("regex");
-	bool found2 = re2::RE2::PartialMatch(ss, twoMoves, &wm, &wclk, &bm, &bclk);
-	if (!found2) {
-		re2::RE2::PartialMatch(ss, oneMove, &wm, &wclk);
-	}
-	profiler.stop("regex");
-
-	vector<string> matches;
-	if (found2) {
-		matches = {wm, wclk, bm, bclk};
-	} else {
-		matches = {wm, wclk};
-	} 
-	return make_tuple(idx, matches);
-}
-
 string clkToSec(string timeStr) {
 	int m = stoi(timeStr.substr(2, 2));
 	int s = stoi(timeStr.substr(5, 2));
 	return to_string(m * 60 + s);
 }
 
-string parseMoves(string moveStr, bool requireClk) {
+tuple<string, string, int8_t> parseMoves(string moveStr) {
 	string mvs = "";
-	string result = "";
+	string clk = "";
+	int8_t result;
 	int curmv = 1;
 	int idx = 0;
 	vector<string> matches;
 	
 	while (idx < moveStr.size()) {
-		profiler.start("matchNextMove");
-		tie(idx, matches) = matchNextMove(moveStr, idx, curmv, requireClk);
-		profiler.stop("matchNextMove");
+		string ss = nextMoveStr(moveStr, idx, curmv);
+		profiler.start("regex");
+		string wm="", bm="", wclk="", bclk="";
+		re2::RE2::PartialMatch(ss, twoMoves, &wm, &wclk, &bm, &bclk);
+		profiler.stop("regex");
 
 		if (idx == moveStr.size()) {
-			re2::RE2::PartialMatch(moveStr.substr(idx-7,7), RESULT_PAT, &result);
-		}
-
-		if (matches.size() == 0) {
-			break;
-		}
-
-		if (matches[1] != "") {
-			mvs += clkToSec(matches[1]) + " ";
-		}
-		mvs += matches[0] + " ";
-		if (matches.size() == 4) {
-			if (matches[3] != "") {
-				mvs += clkToSec(matches[3]) + " ";
+			string res;
+			re2::RE2::PartialMatch(moveStr.substr(idx-7,7), RESULT_PAT, &res);
+			if (res == "1/2-1/2") {
+				result = 2;
+			} else if (res == "0-1") {
+				result = 1;
+			} else {
+				result = 0;
 			}
-			mvs += matches[2] + " ";
+		}
+
+		if (wm == "") {
+			break;
+		} 
+		if (wclk != "") {
+			clk += clkToSec(wclk) + " ";
+		}
+		mvs += wm + " ";
+		if (bclk != "") {
+			clk += clkToSec(bclk) + " ";
+		}
+		if (bm != "") {
+			mvs += bm + " ";
 		}
 		curmv++;
 	}
-	mvs += result;
-	return mvs;
+	return make_tuple(mvs.substr(0, mvs.size()-1), clk.substr(0, clk.size()-1), result);
 }
 
 const string TERM_PATS[] = {

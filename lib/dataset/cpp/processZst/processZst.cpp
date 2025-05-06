@@ -6,7 +6,6 @@
 #include "parallelParser.h"
 #include "serialParser.h"
 #include "lib/parseMoves.h"
-#include "lib/validate.h"
 #include "profiling/profiler.h"
 #include "utils/utils.h"
 #include "lib/decompress.h"
@@ -27,13 +26,13 @@ ABSL_FLAG(int, nMoveProcessors, std::thread::hardware_concurrency()-3, "Number o
 ABSL_FLAG(int, minSec, 300, "Minimum time control for game in seconds");
 ABSL_FLAG(int, maxSec, 10800, "Maximum time control for game in seconds");
 ABSL_FLAG(int, maxInc, 60, "Maximum increment for game in seconds");
-ABSL_FLAG(bool, allowNoClock, false, "Allow games with no clock time data to be included");
 ABSL_FLAG(size_t, chunkSize, 100000, "Number of rows to write per chunk");
 
 arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<ParserOutput> res, size_t chunk_size) {
     auto pool = arrow::default_memory_pool();
 	auto schema =
-		arrow::schema({arrow::field("moves", arrow::utf8()), arrow::field("welo", arrow::int16()),
+		arrow::schema({arrow::field("moves", arrow::utf8()), arrow::field("clk", arrow::utf8()), arrow::field("result", arrow::int8()),
+						arrow::field("welo", arrow::int16()),
 						arrow::field("belo", arrow::int16()),
 						arrow::field("timeCtl", arrow::int16()), arrow::field("increment", arrow::int16())});
 
@@ -43,44 +42,52 @@ arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<
     std::unique_ptr<parquet::arrow::FileWriter> parquet_writer;
     ARROW_ASSIGN_OR_RAISE(parquet_writer, parquet::arrow::FileWriter::Open(*schema, pool, outfile));
 
+	arrow::StringBuilder mv_builder(pool); 	
+    arrow::StringBuilder clk_builder(pool);	
+    arrow::NumericBuilder<arrow::Int16Type> welo_builder(pool);	
+    arrow::NumericBuilder<arrow::Int16Type> belo_builder(pool);	
+    arrow::NumericBuilder<arrow::Int16Type> timeCtl_builder(pool);	
+    arrow::NumericBuilder<arrow::Int16Type> increment_builder(pool);	
+    arrow::NumericBuilder<arrow::Int8Type> result_builder(pool);
+
 	size_t nRows = res->mvs.size();
     for (size_t i=0; i<nRows; i+=chunk_size) {
-        auto mvstart = res->mvs.begin() + i;
-		auto mvend = res->mvs.begin() + i + chunk_size;
-		if (mvend > res->mvs.end()) {
-			mvend = res->mvs.end();
-		}
-		auto mvbatch = std::vector<std::string>(mvstart, mvend);
-        auto welop = res->welos.data() + i;
-        auto belop = res->belos.data() + i;
-        auto timeCtlp = res->timeCtl.data() + i;
-        auto incp = res->increment.data() + i;
 
+		auto batch_size = std::min(chunk_size, nRows-i);
+		mv_builder.Reset();
+		clk_builder.Reset();
+		welo_builder.Reset();
+		belo_builder.Reset();
+		timeCtl_builder.Reset();
+		increment_builder.Reset();
+		result_builder.Reset();
+
+		for (size_t j=0; j<batch_size; j++) {
+			ARROW_RETURN_NOT_OK(mv_builder.Append(res->mvs[i+j]));
+			ARROW_RETURN_NOT_OK(clk_builder.Append(res->clk[i+j]));
+			ARROW_RETURN_NOT_OK(welo_builder.Append(res->welos[i+j]));
+			ARROW_RETURN_NOT_OK(belo_builder.Append(res->belos[i+j]));
+			ARROW_RETURN_NOT_OK(timeCtl_builder.Append(res->timeCtl[i+j]));
+			ARROW_RETURN_NOT_OK(increment_builder.Append(res->increment[i+j]));
+			ARROW_RETURN_NOT_OK(result_builder.Append(res->result[i+j]));
+		}
         std::shared_ptr<arrow::Array> moves;
+		std::shared_ptr<arrow::Array> clk;
         std::shared_ptr<arrow::Array> welos;
         std::shared_ptr<arrow::Array> belos;
         std::shared_ptr<arrow::Array> timeCtl;
         std::shared_ptr<arrow::Array> increment;
+		std::shared_ptr<arrow::Array> result;
 
-        arrow::StringBuilder string_builder(pool);	
-        ARROW_RETURN_NOT_OK(string_builder.AppendValues(mvbatch));
-        ARROW_RETURN_NOT_OK(string_builder.Finish(&moves));
+        ARROW_RETURN_NOT_OK(mv_builder.Finish(&moves));
+        ARROW_RETURN_NOT_OK(clk_builder.Finish(&clk));
+        ARROW_RETURN_NOT_OK(welo_builder.Finish(&welos));
+        ARROW_RETURN_NOT_OK(belo_builder.Finish(&belos));
+        ARROW_RETURN_NOT_OK(timeCtl_builder.Finish(&timeCtl));
+        ARROW_RETURN_NOT_OK(increment_builder.Finish(&increment));
+		ARROW_RETURN_NOT_OK(result_builder.Finish(&result));
 
-		auto batch_size = std::min(chunk_size, nRows-i);
-        arrow::NumericBuilder<arrow::Int16Type> i16_builder(pool);	
-        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(welop, batch_size));
-        ARROW_RETURN_NOT_OK(i16_builder.Finish(&welos));
-        i16_builder.Reset();
-        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(belop, batch_size));
-        ARROW_RETURN_NOT_OK(i16_builder.Finish(&belos));
-        i16_builder.Reset();
-        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(timeCtlp, batch_size));
-        ARROW_RETURN_NOT_OK(i16_builder.Finish(&timeCtl));
-        i16_builder.Reset();
-        ARROW_RETURN_NOT_OK(i16_builder.AppendValues(incp, batch_size));
-        ARROW_RETURN_NOT_OK(i16_builder.Finish(&increment));
-
-        auto batch = arrow::RecordBatch::Make(schema, batch_size, {moves, welos, belos, timeCtl, increment});
+        auto batch = arrow::RecordBatch::Make(schema, batch_size, {moves, clk, result, welos, belos, timeCtl, increment});
         PARQUET_THROW_NOT_OK(parquet_writer->WriteRecordBatch(*batch));
     }
 
@@ -142,11 +149,11 @@ int main(int argc, char *argv[]) {
 				);
 		res = parser.parse(absl::GetFlag(FLAGS_zst), 
 				name,
-			   	!absl::GetFlag(FLAGS_allowNoClock),
-			   	absl::GetFlag(FLAGS_printFreq)
+				absl::GetFlag(FLAGS_printFreq)
 				);
 	}
 	std::string outdir = std::filesystem::absolute(absl::GetFlag(FLAGS_outdir)).string();
+	std::filesystem::create_directories(outdir);
 	auto result = writeParquet(outdir, res, absl::GetFlag(FLAGS_chunkSize));
 	if (!result.ok()) {
 		std::cerr << "Error writing table: " << result.status() << std::endl;

@@ -26,8 +26,6 @@ std::shared_ptr<ParserOutput> processSerial(std::string zst) {
 	int printFreq = 10;
 
 	profiler.init("parseMoves");
-	profiler.init("matchNextMove");
-	profiler.init("inferId");
 	profiler.init("regex");
 	profiler.init("decompress");
 
@@ -41,24 +39,18 @@ std::shared_ptr<ParserOutput> processSerial(std::string zst) {
 			std::string code = processor.processLine(line);		
 			if (code == "COMPLETE") {
 				profiler.start("parseMoves");
-				auto moves = parseMoves(processor.getMoveStr());
+				auto [moves, clk, result] = parseMoves(processor.getMoveStr());
 				profiler.stop("parseMoves");
-				/*auto errs = validateGame(gamestart, processor.getMoveStr(), moves);
-				if (errs.size() > 0) {
-					for (auto [gameid, err]: errs) {
-						std::cout << err << std::endl;
-					}
-					throw std::runtime_error("evaluation failed");
-				}
-				*/
 				output->welos.push_back(processor.getWelo());
 				output->belos.push_back(processor.getBelo());
 				output->timeCtl.push_back(processor.getTime());
 				output->increment.push_back(processor.getInc());
 				output->mvs.push_back(moves);
+				output->clk.push_back(clk);
+				output->result.push_back(result);
 				int ngames = output->gamestarts.size();
-				int totalGamesEst = ngames / ((float)bytesProcessed / nbytes);
-				int curProg = int((100.0f / printFreq) * ngames / totalGamesEst);
+				int totalGamesEst = ngames / ((double)bytesProcessed / nbytes);
+				int curProg = int((100.0 / printFreq) * ngames / totalGamesEst);
 				if (curProg > progress) {
 					progress = curProg;
 					auto [eta, gamesPerSec] = getEta(totalGamesEst, ngames, start);

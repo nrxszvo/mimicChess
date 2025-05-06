@@ -1,7 +1,6 @@
 #include "parallelParser.h"
 #include "lib/decompress.h"
 #include "lib/parseMoves.h"
-#include "lib/validate.h"
 #include "parser.h"
 #include "utils/utils.h"
 #include <stdexcept>
@@ -111,7 +110,7 @@ struct ProcessorState {
 	   	outputCv(outputCv) {};
 };
 
-void processGames(ProcessorState ps, int nReaders, bool requireClk) {		
+void processGames(ProcessorState ps, int nReaders) {		
 	int nReadersDone = 0;
 	std::unordered_set<int> readerPids;
 	int totalGames = 0;
@@ -142,17 +141,12 @@ void processGames(ProcessorState ps, int nReaders, bool requireClk) {
 			}
 		} else {
 			try {
-				auto mvs = parseMoves(gd->moveStr, requireClk);
-				//auto errs = validateGame(gd->gameId, gd->moveStr, mvids);
+				auto [mvs, clk, result] = parseMoves(gd->moveStr);
 				{
 					std::lock_guard<std::mutex> lock(*ps.outputMtx);
-					//if (errs.empty()) {
-						ps.outputQ->push(
-							std::make_shared<MoveData>(gd->pid, gd, mvs)
-						);
-					//} else {
-					//	ps.outputQ->push(std::make_shared<MoveData>(errs));
-					//}
+					ps.outputQ->push(
+						std::make_shared<MoveData>(gd->pid, gd, mvs, clk, result)
+					);
 					ps.outputCv->notify_one();
 				}
 			} catch(std::exception &e) {
@@ -171,14 +165,13 @@ std::vector<std::shared_ptr<std::thread> >  startProcessorThreads(
 		std::mutex& gamesMtx, 
 		std::mutex& outputMtx,
 	   	std::condition_variable& gamesCv, 
-		std::condition_variable& outputCv,
-		bool requireClk) {
+		std::condition_variable& outputCv) {
 
 	std::vector<std::shared_ptr<std::thread> > threads;
 	ProcessorState ps(&gamesQ, &outputQ, &gamesMtx, &outputMtx, &gamesCv, &outputCv);
 	for (int i=0; i<nMoveProcessors; i++) {
 		ps.pid = i;
-		threads.push_back(std::make_shared<std::thread>(processGames, ps, nReaders, requireClk));
+		threads.push_back(std::make_shared<std::thread>(processGames, ps, nReaders));
 	}	
 	return threads;
 }
@@ -195,7 +188,7 @@ ParallelParser::~ParallelParser() {
 	}
 }
 
-std::shared_ptr<ParserOutput> ParallelParser::parse(std::string zst, std::string name, bool requireClk, int printFreq) {
+std::shared_ptr<ParserOutput> ParallelParser::parse(std::string zst, std::string name, int printFreq) {
 	auto output = std::make_shared<ParserOutput>();
 	
 	int64_t ngames = 0;
@@ -214,8 +207,7 @@ std::shared_ptr<ParserOutput> ParallelParser::parse(std::string zst, std::string
 		gamesMtx,
 		outputMtx,
 		gamesCv,
-		outputCv,
-		requireClk
+		outputCv
 	);
 
 	gameThreads = startGamesReader(
@@ -254,6 +246,8 @@ std::shared_ptr<ParserOutput> ParallelParser::parse(std::string zst, std::string
 			output->timeCtl.push_back(md->time);
 			output->increment.push_back(md->inc);
 			output->mvs.push_back(md->mvs);
+			output->clk.push_back(md->clk);
+			output->result.push_back(md->result);
 			ngames++;
 			
 			int totalGamesEst = ngames / md->progress;

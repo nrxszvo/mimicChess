@@ -2,8 +2,6 @@
 #include <vector>
 #include <tuple>
 
-std::tuple<int, std::vector<std::string> > matchNextMove(std::string& moveStr, int idx, int curmv, bool requireClk);
-
 struct State {
 	std::string weloStr;
 	std::string beloStr;
@@ -25,7 +23,7 @@ struct State {
 	};
 };
 
-std::string parseMoves(std::string moveStr, bool requireClk=true);
+std::tuple<std::string, std::string, int8_t> parseMoves(std::string moveStr);
 
 class PgnProcessor {
 public:

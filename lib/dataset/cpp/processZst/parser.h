@@ -11,5 +11,7 @@ struct ParserOutput {
 	std::vector<int16_t> increment;
 	std::vector<int64_t> gamestarts;
 	std::vector<std::string> mvs;
+	std::vector<int8_t> result;
+	std::vector<std::string> clk;
 };
 #endif
