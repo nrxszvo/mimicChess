@@ -39,7 +39,7 @@ std::shared_ptr<ParserOutput> processSerial(std::string zst) {
 			std::string code = processor.processLine(line);		
 			if (code == "COMPLETE") {
 				profiler.start("parseMoves");
-				auto [moves, clk, result] = parseMoves(processor.getMoveStr());
+				auto [moves, clk, eval, result] = parseMoves(processor.getMoveStr());
 				profiler.stop("parseMoves");
 				output->welos.push_back(processor.getWelo());
 				output->belos.push_back(processor.getBelo());
@@ -47,6 +47,7 @@ std::shared_ptr<ParserOutput> processSerial(std::string zst) {
 				output->increment.push_back(processor.getInc());
 				output->mvs.push_back(moves);
 				output->clk.push_back(clk);
+				output->eval.push_back(eval);
 				output->result.push_back(result);
 				int ngames = output->gamestarts.size();
 				int totalGamesEst = ngames / ((double)bytesProcessed / nbytes);

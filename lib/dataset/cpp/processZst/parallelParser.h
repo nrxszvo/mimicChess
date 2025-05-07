@@ -44,14 +44,16 @@ struct MoveData: Data {
 			std::shared_ptr<GameData> gd, 
 			std::string mvs,
 			std::string clk,
+			std::string eval,
 			uint8_t result
 			) 
-		: Data(pid, gd), mvs(mvs), clk(clk), result(result) {
+		: Data(pid, gd), mvs(mvs), clk(clk), eval(eval), result(result) {
 		this->info = "GAME";
 	};
 
 	std::string mvs;
 	std::string clk;
+	std::string eval;
 	uint8_t result;
 };
 

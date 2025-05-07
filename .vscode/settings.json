@@ -1,27 +1,18 @@
 {
     "editor.formatOnSave": true,
+    "editor.formatOnSaveMode": "file",
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": true,
     "python.linting.flake8Enabled": true,
     "python.linting.mypyEnabled": true,
-    "python.formatting.provider": "black",
-    "python.formatting.blackArgs": [
-        "--line-length",
-        "88"
-    ],
-    "python.linting.lintOnSave": true,
+    "python.defaultInterpreterPath": "/Users/michaelhorgan/miniconda3/bin/python",
     "[python]": {
-        "editor.defaultFormatter": "ms-python.python",
         "editor.formatOnSave": true,
-        "editor.codeActionsOnSave": {
-            "source.organizeImports": "explicit"
-        }
+        "editor.defaultFormatter": "mikoz.black-py"
     },
     "C_Cpp.clang_format_style": "file",
     "C_Cpp.formatting.enabled": true,
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.codeAnalysis.runAutomatically": true,
-    "[cpp]": {
-        "editor.formatOnSave": true
-    }
+    "cmake.sourceDirectory": "/Users/michaelhorgan/git/mimicChess/lib/dataset/cpp"
 }

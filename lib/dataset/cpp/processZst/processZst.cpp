@@ -26,12 +26,12 @@ ABSL_FLAG(int, nMoveProcessors, std::thread::hardware_concurrency()-3, "Number o
 ABSL_FLAG(int, minSec, 300, "Minimum time control for game in seconds");
 ABSL_FLAG(int, maxSec, 10800, "Maximum time control for game in seconds");
 ABSL_FLAG(int, maxInc, 60, "Maximum increment for game in seconds");
-ABSL_FLAG(size_t, chunkSize, 100000, "Number of rows to write per chunk");
+ABSL_FLAG(size_t, rowGroupSize, 100000, "Parquet row group size");
 
 arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<ParserOutput> res, size_t chunk_size) {
     auto pool = arrow::default_memory_pool();
 	auto schema =
-		arrow::schema({arrow::field("moves", arrow::utf8()), arrow::field("clk", arrow::utf8()), arrow::field("result", arrow::int8()),
+		arrow::schema({arrow::field("moves", arrow::utf8()), arrow::field("clk", arrow::utf8()), arrow::field("eval", arrow::utf8()), arrow::field("result", arrow::int8()),
 						arrow::field("welo", arrow::int16()),
 						arrow::field("belo", arrow::int16()),
 						arrow::field("timeCtl", arrow::int16()), arrow::field("increment", arrow::int16())});
@@ -39,11 +39,17 @@ arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
     PARQUET_ASSIGN_OR_THROW(outfile, arrow::io::FileOutputStream::Open(root_path + "/data.parquet"));
 
+	parquet::WriterProperties::Builder builder;
+    builder.compression(parquet::Compression::ZSTD);
+
+    std::shared_ptr<parquet::WriterProperties> props = builder.build();
+
     std::unique_ptr<parquet::arrow::FileWriter> parquet_writer;
-    ARROW_ASSIGN_OR_RAISE(parquet_writer, parquet::arrow::FileWriter::Open(*schema, pool, outfile));
+    ARROW_ASSIGN_OR_RAISE(parquet_writer, parquet::arrow::FileWriter::Open(*schema, pool, outfile, props));
 
 	arrow::StringBuilder mv_builder(pool); 	
     arrow::StringBuilder clk_builder(pool);	
+    arrow::StringBuilder eval_builder(pool);	
     arrow::NumericBuilder<arrow::Int16Type> welo_builder(pool);	
     arrow::NumericBuilder<arrow::Int16Type> belo_builder(pool);	
     arrow::NumericBuilder<arrow::Int16Type> timeCtl_builder(pool);	
@@ -61,10 +67,12 @@ arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<
 		timeCtl_builder.Reset();
 		increment_builder.Reset();
 		result_builder.Reset();
+		eval_builder.Reset();
 
 		for (size_t j=0; j<batch_size; j++) {
 			ARROW_RETURN_NOT_OK(mv_builder.Append(res->mvs[i+j]));
 			ARROW_RETURN_NOT_OK(clk_builder.Append(res->clk[i+j]));
+			ARROW_RETURN_NOT_OK(eval_builder.Append(res->eval[i+j]));
 			ARROW_RETURN_NOT_OK(welo_builder.Append(res->welos[i+j]));
 			ARROW_RETURN_NOT_OK(belo_builder.Append(res->belos[i+j]));
 			ARROW_RETURN_NOT_OK(timeCtl_builder.Append(res->timeCtl[i+j]));
@@ -78,16 +86,18 @@ arrow::Result<std::string> writeParquet(std::string& root_path, std::shared_ptr<
         std::shared_ptr<arrow::Array> timeCtl;
         std::shared_ptr<arrow::Array> increment;
 		std::shared_ptr<arrow::Array> result;
+		std::shared_ptr<arrow::Array> eval;
 
         ARROW_RETURN_NOT_OK(mv_builder.Finish(&moves));
         ARROW_RETURN_NOT_OK(clk_builder.Finish(&clk));
+        ARROW_RETURN_NOT_OK(eval_builder.Finish(&eval));
         ARROW_RETURN_NOT_OK(welo_builder.Finish(&welos));
         ARROW_RETURN_NOT_OK(belo_builder.Finish(&belos));
         ARROW_RETURN_NOT_OK(timeCtl_builder.Finish(&timeCtl));
         ARROW_RETURN_NOT_OK(increment_builder.Finish(&increment));
 		ARROW_RETURN_NOT_OK(result_builder.Finish(&result));
 
-        auto batch = arrow::RecordBatch::Make(schema, batch_size, {moves, clk, result, welos, belos, timeCtl, increment});
+        auto batch = arrow::RecordBatch::Make(schema, batch_size, {moves, clk, eval, result, welos, belos, timeCtl, increment});
         PARQUET_THROW_NOT_OK(parquet_writer->WriteRecordBatch(*batch));
     }
 
@@ -154,7 +164,7 @@ int main(int argc, char *argv[]) {
 	}
 	std::string outdir = std::filesystem::absolute(absl::GetFlag(FLAGS_outdir)).string();
 	std::filesystem::create_directories(outdir);
-	auto result = writeParquet(outdir, res, absl::GetFlag(FLAGS_chunkSize));
+	auto result = writeParquet(outdir, res, absl::GetFlag(FLAGS_rowGroupSize));
 	if (!result.ok()) {
 		std::cerr << "Error writing table: " << result.status() << std::endl;
 		return 1;

@@ -13,5 +13,6 @@ struct ParserOutput {
 	std::vector<std::string> mvs;
 	std::vector<int8_t> result;
 	std::vector<std::string> clk;
+	std::vector<std::string> eval;
 };
 #endif

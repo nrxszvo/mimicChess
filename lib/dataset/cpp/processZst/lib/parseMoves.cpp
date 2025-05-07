@@ -9,7 +9,7 @@
 using namespace std;
 
 const string MV_PAT = "(O-O-O\\+?#?|O-O\\+?#?|[a-hRNBQK]+[0-9=x]*[a-hRNBQK]*[0-9]*[=RNBQ+#]*)\\??\\??\\!?";
-const string CLK_PAT = "(?:\\{ (?:\\[%eval [0-9.\\-#]+\\] )?\\[%clk ([0-9:]+)\\] \\})?";
+const string CLK_PAT = "(?:\\{ (?:\\[%eval ([0-9.\\-#]+)\\] )?(?:\\[%clk ([0-9:]+)\\] )?\\})?";
 const string ALT_LINE_PAT = "(?:\\([0-9]+\\.[0-9a-hRNBQK]*\\))?";
 const string NUM_PAT = "[0-9]+\\.";
 const string NUM_ALT_PAT = "(?:" + NUM_PAT + "\\.\\.)?";
@@ -54,9 +54,10 @@ string clkToSec(string timeStr) {
 	return to_string(m * 60 + s);
 }
 
-tuple<string, string, int8_t> parseMoves(string moveStr) {
+tuple<string, string, string, int8_t> parseMoves(string moveStr) {
 	string mvs = "";
 	string clk = "";
+	string eval = "";
 	int8_t result;
 	int curmv = 1;
 	int idx = 0;
@@ -65,8 +66,8 @@ tuple<string, string, int8_t> parseMoves(string moveStr) {
 	while (idx < moveStr.size()) {
 		string ss = nextMoveStr(moveStr, idx, curmv);
 		profiler.start("regex");
-		string wm="", bm="", wclk="", bclk="";
-		re2::RE2::PartialMatch(ss, twoMoves, &wm, &wclk, &bm, &bclk);
+		string wm="", bm="", weval="", wclk="", beval="", bclk="";
+		re2::RE2::PartialMatch(ss, twoMoves, &wm, &weval, &wclk, &bm, &beval, &bclk);
 		profiler.stop("regex");
 
 		if (idx == moveStr.size()) {
@@ -84,19 +85,26 @@ tuple<string, string, int8_t> parseMoves(string moveStr) {
 		if (wm == "") {
 			break;
 		} 
+		if (weval != "") {
+			eval += weval + " ";
+		}
 		if (wclk != "") {
 			clk += clkToSec(wclk) + " ";
 		}
 		mvs += wm + " ";
+
 		if (bclk != "") {
 			clk += clkToSec(bclk) + " ";
 		}
 		if (bm != "") {
 			mvs += bm + " ";
 		}
+		if (beval != "") {
+			eval += beval + " ";
+		}
 		curmv++;
 	}
-	return make_tuple(mvs.substr(0, mvs.size()-1), clk.substr(0, clk.size()-1), result);
+	return make_tuple(mvs.substr(0, mvs.size()-1), clk.substr(0, clk.size()-1), eval.substr(0, eval.size()-1), result);
 }
 
 const string TERM_PATS[] = {

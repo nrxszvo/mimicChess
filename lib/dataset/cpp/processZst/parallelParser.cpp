@@ -141,11 +141,11 @@ void processGames(ProcessorState ps, int nReaders) {
 			}
 		} else {
 			try {
-				auto [mvs, clk, result] = parseMoves(gd->moveStr);
+				auto [mvs, clk, eval, result] = parseMoves(gd->moveStr);
 				{
 					std::lock_guard<std::mutex> lock(*ps.outputMtx);
 					ps.outputQ->push(
-						std::make_shared<MoveData>(gd->pid, gd, mvs, clk, result)
+						std::make_shared<MoveData>(gd->pid, gd, mvs, clk, eval, result)
 					);
 					ps.outputCv->notify_one();
 				}
@@ -247,6 +247,7 @@ std::shared_ptr<ParserOutput> ParallelParser::parse(std::string zst, std::string
 			output->increment.push_back(md->inc);
 			output->mvs.push_back(md->mvs);
 			output->clk.push_back(md->clk);
+			output->eval.push_back(md->eval);
 			output->result.push_back(md->result);
 			ngames++;
 			

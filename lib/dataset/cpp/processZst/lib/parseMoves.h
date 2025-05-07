@@ -23,7 +23,7 @@ struct State {
 	};
 };
 
-std::tuple<std::string, std::string, int8_t> parseMoves(std::string moveStr);
+std::tuple<std::string, std::string, std::string, int8_t> parseMoves(std::string moveStr);
 
 class PgnProcessor {
 public:
