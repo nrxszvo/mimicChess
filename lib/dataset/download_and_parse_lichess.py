@@ -1,20 +1,37 @@
 import argparse
 import os
-import sys
 import re
 import subprocess
-import tempfile
 import time
-
-import wget
-from multiprocessing import Queue, Process
-
-from pgnutils import timeit, DataWriter, PrintSafe, resize_mmaps
+from multiprocessing import Lock, Process, Queue
 
 
-def collect_existing_npy(npy_dir):
+class PrintSafe:
+    def __init__(self):
+        self.lock = Lock()
+
+    def __call__(self, string, end="\n"):
+        self.lock.acquire()
+        try:
+            print(string, end=end)
+        finally:
+            self.lock.release()
+
+
+def timeit(fn):
+    start = time.time()
+    ret = fn()
+    end = time.time()
+    nsec = end - start
+    hr = int(nsec // 3600)
+    minute = int((nsec % 3600) // 60)
+    sec = int(nsec % 60)
+    return ret, f"{hr}:{minute:02}:{sec:02}"
+
+
+def collect_existing_npy(out_dir):
     existing = []
-    procfn = os.path.join(npy_dir, "processed.txt")
+    procfn = os.path.join(out_dir, "processed.txt")
     if os.path.exists(procfn):
         with open(procfn) as f:
             for line in f:
@@ -24,14 +41,15 @@ def collect_existing_npy(npy_dir):
     return existing
 
 
-def collect_remaining(list_fn, npy_dir):
-    existing = collect_existing_npy(npy_dir)
+def collect_remaining(list_fn, out_dir):
+    existing = collect_existing_npy(out_dir)
     to_proc = []
     with open(list_fn) as f:
         for line in f:
-            npyname = re.match(r".+standard_rated_([0-9\-]+)\.pgn\.zst", line).group(1)
-            if npyname not in existing:
-                to_proc.append((line.rstrip(), npyname))
+            print(line)
+            name = re.match(r".+standard_rated_([0-9\-]+)\.pgn\.zst", line).group(1)
+            if name not in existing:
+                to_proc.append((line.rstrip(), name))
     return to_proc
 
 
@@ -46,7 +64,7 @@ def download_proc(pid, url_q, zst_q, print_safe):
     added = 0
     completed = 0
     while True:
-        url, npyname = url_q.get()
+        url, name = url_q.get()
         if url == "DONE":
             zst_q.put(("DONE", None))
             break
@@ -56,14 +74,12 @@ def download_proc(pid, url_q, zst_q, print_safe):
                 while added - completed > 2:
                     print_safe(f"download proc {pid} is sleeping...")
                     time.sleep(5 * 60)
-                print_safe(f"{npyname}: downloading...")
-                _, time_str = timeit(
-                    lambda: wget.download(url, bar=lambda a, b, c: None)
-                )
-                print_safe(f"{npyname}: finished downloading in {time_str}")
+                print_safe(f"{name}: downloading...")
+                _, time_str = timeit(lambda: subprocess.call(["wget", url]))
+                print_safe(f"{name}: finished downloading in {time_str}")
                 completed += 1
         added += 1
-        zst_q.put((npyname, zst))
+        zst_q.put((name, zst))
 
 
 def start_download_procs(url_q, zst_q, print_safe, nproc):
@@ -78,24 +94,18 @@ def start_download_procs(url_q, zst_q, print_safe, nproc):
 
 def main(
     list_fn,
-    npy_dir,
-    parser_bin,
+    out_dir,
+    processor_bin,
     n_dl_proc,
     max_active_procs,
     n_reader_proc,
     n_move_proc,
-    allow_no_clock,
-    alloc_games,
-    alloc_moves,
     minSec,
-    resize_bin,
 ):
-    to_proc = collect_remaining(list_fn, npy_dir)
+    to_proc = collect_remaining(list_fn, out_dir)
     if len(to_proc) == 0:
         print("All files already processed")
         return
-
-    dataWriter = DataWriter(npy_dir, alloc_games, alloc_moves)
 
     url_q = Queue()
     zst_q = Queue()
@@ -112,22 +122,21 @@ def main(
         active_procs = []
         terminate = False
         while True:
-            npyname, zst_fn = zst_q.get()
-            if npyname == "DONE":
+            name, zst_fn = zst_q.get()
+            if name == "DONE":
                 n_dl_done += 1
                 if n_dl_done == n_dl_proc:
                     terminate = True
             else:
-                tmpdir = tempfile.TemporaryDirectory()
-                print_safe(f"{npyname}: processing zst into {tmpdir.name}...")
+                print_safe(f"{name}: processing zst into {out_dir}...")
                 cmd = [
-                    parser_bin,
+                    processor_bin,
                     "--zst",
                     zst_fn,
                     "--name",
-                    npyname,
+                    name,
                     "--outdir",
-                    tmpdir.name,
+                    os.path.join(out_dir, name),
                     "--nReaders",
                     str(n_reader_proc),
                     "--nMoveProcessors",
@@ -135,48 +144,35 @@ def main(
                     "--minSec",
                     str(minSec),
                 ]
-                if allow_no_clock:
-                    cmd.append("--allowNoClock")
-
                 p = subprocess.Popen(cmd)
-                active_procs.append((p, tmpdir, npyname, zst_fn))
+                active_procs.append((p, name, zst_fn))
 
-            def check_cleanup(p, tmpdir, name, zst):
+            def check_cleanup(p, name, zst):
                 finished = False
-                nmoves = None
                 status = p.poll()
                 if status is not None:
-                    try:
-                        if status != 0:
-                            print_safe(f"{name}: poll returned {status}")
-                            _, errs = p.communicate()
-                            if errs is not None:
-                                print_safe(f"{name}: returned errors:\n{errs}")
-                            return True, 0
+                    if status != 0:
+                        print_safe(f"{name}: poll returned {status}")
+                        _, errs = p.communicate()
+                        if errs is not None:
+                            print_safe(f"{name}: returned errors:\n{errs}")
+                        return True, status
+                    os.remove(zst)
+                    finished = True
 
-                        print_safe(f"{name}: writing to file from {tmpdir.name}...")
-                        nmoves, timestr = timeit(
-                            lambda: dataWriter.write_npys(tmpdir.name, name)
-                        )
-                        print_safe(f"{name}: finished writing in {timestr}")
-                        os.remove(zst)
-                        finished = True
-                    finally:
-                        tmpdir.cleanup()
-
-                return finished, nmoves
+                return finished, status
 
             while len(active_procs) == max_active_procs or (
                 terminate and len(active_procs) > 0
             ):
                 time.sleep(5)
                 for procdata in reversed(active_procs):
-                    finished, nmoves = check_cleanup(*procdata)
+                    finished, status = check_cleanup(*procdata)
                     if finished:
-                        if nmoves == 0:
+                        if status > 0:
                             terminate = True
                             print_safe(
-                                "Last archive contained no moves, 'terminate' signaled"
+                                f"Last archive failed with status {status}, 'terminate' signaled"
                             )
                         active_procs.remove(procdata)
                         break
@@ -186,9 +182,8 @@ def main(
 
     finally:
         print_safe("cleaning up...")
-        for p, tmpdir, _, zst in active_procs:
+        for p, _, zst in active_procs:
             p.kill()
-            tmpdir.cleanup()
             # os.remove(zst)
         url_q.close()
         zst_q.close()
@@ -201,7 +196,6 @@ def main(
         for fn in os.listdir("."):
             if re.match(r"lichess_db_standard_rated.*\.zst.*\.tmp", fn):
                 os.remove(fn)
-        resize_mmaps(resize_bin, npy_dir)
 
 
 if __name__ == "__main__":
@@ -217,8 +211,12 @@ if __name__ == "__main__":
         default="list.txt",
         help="txt file containing list of pgn zips to download and parse",
     )
-    parser.add_argument("--npy", default="npy_w_clk", help="folder to save npy files")
-    parser.add_argument("--parser", default="./processZst", help="parser binary")
+    parser.add_argument("--outdir", default=".", help="folder to save parquet files")
+    parser.add_argument(
+        "--processor",
+        default="cpp/build/processZst/processZst",
+        help="zst/pgn processor binary",
+    )
     parser.add_argument(
         "--n_dl_procs",
         default=2,
@@ -243,58 +241,22 @@ if __name__ == "__main__":
         help="number of move parser threads",
         type=int,
     )
-
-    parser.add_argument(
-        "--allow_no_clock",
-        default=False,
-        action="store_true",
-        help="allow games without clock time data to be included",
-    )
-    parser.add_argument(
-        "--alloc_games",
-        default=1,
-        help="initial memory allocation for game-level data (elos, gamestarts) in billions of games",
-        type=float,
-    )
-    parser.add_argument(
-        "--alloc_moves",
-        default=50,
-        help="initial memory allocation for move data (mvids, clk times) in billions of moves",
-        type=float,
-    )
     parser.add_argument(
         "--min_seconds",
-        default=180,
+        default=60,
         help="minimum time control for games in seconds",
         type=int,
     )
-    parser.add_argument(
-        "--resize_bin",
-        default="./resizeMMap",
-        help="binary for resizing memmaps after all data has been processed",
-    )
+
     args = parser.parse_args()
-    alloc_games = int(1e9 * args.alloc_games)
-    alloc_moves = int(1e9 * args.alloc_moves)
-    if alloc_moves >= 5e10:
-        print(
-            f"WARNING: allocating {4 * alloc_moves / 1024**3:.2f} GB of output.  Continue?"
-        )
-        resp = input("Y|n")
-        if resp == "n":
-            sys.exit()
 
     main(
         args.list,
-        args.npy,
-        args.parser,
+        args.outdir,
+        args.processor,
         args.n_dl_procs,
         args.n_active_procs,
         args.n_reader_procs,
         args.n_move_procs,
-        args.allow_no_clock,
-        alloc_games,
-        alloc_moves,
         args.min_seconds,
-        args.resize_bin,
     )
