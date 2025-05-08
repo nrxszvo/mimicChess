@@ -109,13 +109,16 @@ def create_fens(pqfile, nwriteprocs, batch_size, fen_fn="fens.raw"):
 class PgnIterator:
     def __init__(self, pqfile, batch_size):
         self.iter = pq.ParquetFile(pqfile).iter_batches(
-            batch_size=batch_size, columns=["moves"]
+            batch_size=batch_size, columns=["moves", "clk"]
         )
 
     def __iter__(self):
         for batch in self.iter:
-            for pgn in batch["moves"]:
-                yield pgn.as_py()
+            for pgn, clk in zip(batch["moves"], batch["clk"]):
+                game = ""
+                for mv, tim in zip(pgn.as_py().split(), clk.as_py().split()):
+                    game += tim + " " + mv + " "
+                yield game
 
 
 class FenIterator:
