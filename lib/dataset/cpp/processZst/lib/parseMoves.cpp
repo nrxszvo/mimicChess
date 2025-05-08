@@ -15,15 +15,11 @@ const string NUM_PAT = "[0-9]+\\.";
 const string NUM_ALT_PAT = "(?:" + NUM_PAT + "\\.\\.)?";
 const string RESULT_PAT = ".*(1/2-1/2|0-1|1-0)";
 
-const re2::RE2 twoMoves(NUM_PAT + " " + MV_PAT + " " + CLK_PAT + " ?" + NUM_ALT_PAT + " ?" + "(?:" + MV_PAT + ")? ?" + CLK_PAT);
-
-string movenoToStr(int moveno) {
-	return to_string(moveno) + ". ";
-}
+const re2::RE2 fullMovePat(NUM_PAT + " " + MV_PAT + " " + CLK_PAT + " ?" + NUM_ALT_PAT + " ?" + "(?:" + MV_PAT + ")? ?" + CLK_PAT);
 
 string nextMoveStr(string& moveStr, int& idx, int curmv) {
 	int mvstart = idx;
-	string nextmv = movenoToStr(curmv+1);
+	string nextmv = to_string(curmv+1) + ". ";
 
 	bool inParens = false;
 	bool inBracket = false;
@@ -61,13 +57,12 @@ tuple<string, string, string, int8_t> parseMoves(string moveStr) {
 	int8_t result;
 	int curmv = 1;
 	int idx = 0;
-	vector<string> matches;
 	
 	while (idx < moveStr.size()) {
 		string ss = nextMoveStr(moveStr, idx, curmv);
 		profiler.start("regex");
 		string wm="", bm="", weval="", wclk="", beval="", bclk="";
-		re2::RE2::PartialMatch(ss, twoMoves, &wm, &weval, &wclk, &bm, &beval, &bclk);
+		re2::RE2::PartialMatch(ss, fullMovePat, &wm, &weval, &wclk, &bm, &beval, &bclk);
 		profiler.stop("regex");
 
 		if (idx == moveStr.size()) {

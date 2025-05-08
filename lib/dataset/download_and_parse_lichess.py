@@ -251,12 +251,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(
-        args.list,
-        args.outdir,
-        args.processor,
-        args.n_dl_procs,
-        args.n_active_procs,
-        args.n_reader_procs,
-        args.n_move_procs,
-        args.min_seconds,
+        list_fn=args.list,
+        out_dir=args.outdir,
+        processor_bin=args.processor,
+        n_dl_proc=args.n_dl_procs,
+        max_active_procs=args.n_active_procs,
+        n_reader_proc=args.n_reader_procs,
+        n_move_proc=args.n_move_procs,
+        minSec=args.min_seconds,
     )
