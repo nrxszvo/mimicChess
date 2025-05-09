@@ -2,6 +2,10 @@ name: base
 dependencies:
   - anaconda::python=3.11
   - anaconda::pip
+  # bit of a hack here: we use conda to install tensorboard and matplotlib
+  # because they will also install RE2 and Abseil libraries and their associated 
+  # CMake config files, allowing us to compile the C++ project in lib/dataset/cpp
+  # note: the apt installation of these libs does not include their CMake config files
   - conda-forge::tensorboard
   - conda-forge::matplotlib
   - pip:
