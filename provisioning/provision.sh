@@ -1,8 +1,12 @@
 CONDA_VER=latest
 OS_TYPE=$(uname -i)
 CONDA_DIR=${HOME}/miniconda
-PY_VER=3.10
+PY_VER=3.11
 cd ${HOME} 
+
+if [[ "$OS_TYPE=="unknown" ]]; then
+	OS_TYPE="x86_64"
+fi
 
 if [ ! -d "${CONDA_DIR}" ]; then
 	echo "removing local python site-packages..."
@@ -49,35 +53,31 @@ if [ ! -d "${HOME}/git/mimicChess" ]; then
 	cd ${HOME} 
 fi
 
-conda env update --file=git/mimicChess/provisioning/environment.yml
-
-if ! command -v npm 2>&1 >/dev/null
+if command -v nvidia-smi 2>&1 >/dev/null 
 then
-	curl -fsSL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh
-	sudo -E bash nodesource_setup.sh
-	sudo apt-get install -y nodejs
-fi
-sudo npm install --global prettier
-if ! command -v yarn 2>&1 > /dev/null
-then
-	sudo npm install --global yarn
-fi
-
-if [ ! -e "${HOME}/.vim/autoload/plug.vim" ]; then
-	curl -fLo ${HOME}/.vim/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-	sudo add-apt-repository -y ppa:jonathonf/vim
-	sudo apt update
-	sudo apt install -y vim
-fi
-
-if [ ! -d "${HOME}/git/vimrc" ]; then
-	cd ${HOME}/git
-	git clone https://github.com/nrxszvo/vimrc.git
-	cp vimrc/vimrc ${HOME}/.vimrc
-	cp vimrc/coc-settings.json ${HOME}/.vim/coc-settings.json
+	conda env create --name mimic --file=git/mimicChess/provisioning/environment_nvidia.yml
+else
+	conda env create --name mimic --file=git/mimicChess/provisioning/environment.yml
 fi
 
 echo "set -g mouse on" > ${HOME}/.tmux.conf
 
-sudo apt-get install -y stockfish libzstd-dev clangd libarrow-dev libparquet-dev
-
+sudo apt update
+sudo apt install -y -V ca-certificates lsb-release wget stockfish libzstd-dev clangd
+wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+sudo apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+sudo apt update
+sudo apt install -y -V libarrow-dev # For C++
+sudo apt install -y -V libarrow-glib-dev # For GLib (C)
+sudo apt install -y -V libarrow-dataset-dev # For Apache Arrow Dataset C++
+sudo apt install -y -V libarrow-dataset-glib-dev # For Apache Arrow Dataset GLib (C)
+sudo apt install -y -V libarrow-acero-dev # For Apache Arrow Acero
+sudo apt install -y -V libarrow-flight-dev # For Apache Arrow Flight C++
+sudo apt install -y -V libarrow-flight-glib-dev # For Apache Arrow Flight GLib (C)
+sudo apt install -y -V libarrow-flight-sql-dev # For Apache Arrow Flight SQL C++
+sudo apt install -y -V libarrow-flight-sql-glib-dev # For Apache Arrow Flight SQL GLib (C)
+sudo apt install -y -V libgandiva-dev # For Gandiva C++
+sudo apt install -y -V libgandiva-glib-dev # For Gandiva GLib (C)
+sudo apt install -y -V libparquet-dev # For Apache Parquet C++
+sudo apt install -y -V libparquet-glib-dev # For Apache Parquet GLib (C)
+rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
