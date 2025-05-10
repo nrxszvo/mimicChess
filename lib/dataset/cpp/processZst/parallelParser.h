@@ -6,6 +6,7 @@
 #include <memory>
 #include <thread>
 #include "parser.h"
+#include "parquetWriter.h"
 
 struct Data {
 	int pid;
@@ -57,9 +58,12 @@ struct MoveData: Data {
 	uint8_t result;
 };
 
+typedef std::vector<std::shared_ptr<GameData> > GameDataBlock;
+typedef std::vector<std::shared_ptr<MoveData> > MoveDataBlock;
+
 class ParallelParser {
-	std::queue<std::shared_ptr<GameData> > gamesQ;
-	std::queue<std::shared_ptr<MoveData> > outputQ;
+	std::queue<std::shared_ptr<GameDataBlock> > gamesQ;
+	std::queue<std::shared_ptr<MoveDataBlock> > outputQ;
 	std::mutex gamesMtx;
 	std::mutex outputMtx;
 	std::condition_variable gamesCv;
@@ -71,8 +75,10 @@ class ParallelParser {
 	int maxInc;
 	std::vector<std::shared_ptr<std::thread> > procThreads;
 	std::vector<std::shared_ptr<std::thread> > gameThreads;
+	ParquetWriter writer;
+	size_t chunkSize;
 public:
-	ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc);
+	ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::string root_path, size_t chunkSize);
 	~ParallelParser();
-	std::shared_ptr<ParserOutput> parse(std::string zst, std::string name, int printFreq=60);
+	int64_t parse(std::string zst, std::string name, int procId, int printFreq=60);
 };
