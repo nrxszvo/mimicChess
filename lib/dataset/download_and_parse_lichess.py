@@ -1,19 +1,22 @@
 import argparse
+import sys
 import os
 import re
 import subprocess
 import time
 from multiprocessing import Lock, Process, Queue
 
+devnull = open(os.devnull, 'w')
+
 
 class PrintSafe:
     def __init__(self):
         self.lock = Lock()
 
-    def __call__(self, string, end="\n"):
+    def __call__(self, *args, **kwargs):
         self.lock.acquire()
         try:
-            print(string, end=end)
+            print(*args, **kwargs)
         finally:
             self.lock.release()
 
@@ -29,24 +32,22 @@ def timeit(fn):
     return ret, f"{hr}:{minute:02}:{sec:02}"
 
 
-def collect_existing_npy(out_dir):
+def collect_existing(out_dir):
     existing = []
     procfn = os.path.join(out_dir, "processed.txt")
     if os.path.exists(procfn):
         with open(procfn) as f:
             for line in f:
-                _, name, _, _, _, status = line.rstrip().split(",")
-                if status != "failed":
-                    existing.append(name)
+                name = line.rstrip()
+                existing.append(name)
     return existing
 
 
 def collect_remaining(list_fn, out_dir):
-    existing = collect_existing_npy(out_dir)
+    existing = collect_existing(out_dir)
     to_proc = []
     with open(list_fn) as f:
         for line in f:
-            print(line)
             name = re.match(r".+standard_rated_([0-9\-]+)\.pgn\.zst", line).group(1)
             if name not in existing:
                 to_proc.append((line.rstrip(), name))
@@ -60,32 +61,46 @@ def parse_url(url):
     return zst, pgn_fn
 
 
-def download_proc(pid, url_q, zst_q, print_safe):
-    added = 0
-    completed = 0
+class Monitor:
+    def __init__(self, dl_dir, max_active_procs, zst_list):
+        self.dl_dir = dl_dir
+        self.max_active_procs = max_active_procs
+        self.zst_list = zst_list
+
+    def get_existing_zsts(self):
+        zsts = list(filter(lambda fn: fn in self.zst_list, os.listdir(self.dl_dir)))
+        return zsts
+
+    def should_sleep(self):
+        zsts = self.get_existing_zsts()
+        return len(zsts) >= 2*self.max_active_procs
+
+
+def download_proc(pid, dl_start, url_q, zst_q, print_safe, monitor):
+    line = dl_start + pid
     while True:
         url, name = url_q.get()
         if url == "DONE":
             zst_q.put(("DONE", None))
             break
         zst, _ = parse_url(url)
-        if not os.path.exists(zst):
-            if not os.path.exists(zst):
-                while added - completed > 2:
-                    print_safe(f"download proc {pid} is sleeping...")
-                    time.sleep(5 * 60)
-                print_safe(f"{name}: downloading...")
-                _, time_str = timeit(lambda: subprocess.call(["wget", url]))
-                print_safe(f"{name}: finished downloading in {time_str}")
-                completed += 1
-        added += 1
+        if not os.path.exists(os.path.join(monitor.dl_dir, zst)):
+            while monitor.should_sleep():
+                print_safe(f"\033[{line}H\033[Kdl proc: sleeping...", end='\r')
+                time.sleep(5)
+            print_safe(f"\033[{line}H\033[Kdl proc: downloading {name}", end='\r')
+            _, time_str = timeit(lambda: subprocess.call(
+                ["wget", "-nv", url], cwd=monitor.dl_dir, stdout=devnull, stderr=devnull))
+            print_safe(
+                f"\033[{line}H\033[Kdl proc: finished downloading {name} in {time_str}", end='\r')
         zst_q.put((name, zst))
 
 
-def start_download_procs(url_q, zst_q, print_safe, nproc):
+def start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, nproc):
     procs = []
     for pid in range(nproc):
-        p = Process(target=download_proc, args=((pid, url_q, zst_q, print_safe)))
+        p = Process(target=download_proc, args=(
+            pid, dl_start, url_q, zst_q, print_safe, monitor))
         p.daemon = True
         p.start()
         procs.append(p)
@@ -111,13 +126,34 @@ def main(
     zst_q = Queue()
 
     print_safe = PrintSafe()
-    dl_ps = start_download_procs(url_q, zst_q, print_safe, n_dl_proc)
+    os.makedirs("tmp_zst", exist_ok=True)
+    zst_list = [fn.split('/')[-1] for fn, _ in to_proc]
+    monitor = Monitor('tmp_zst', max_active_procs, zst_list)
+
+    dl_start = 1
+    dl_height = 1
+    parse_start = dl_start + n_dl_proc*dl_height + 1
+    parse_height = n_reader_proc
+    screen_height = n_dl_proc*dl_height + 1 + max_active_procs*(parse_height+1)
+
+    print('\033[2J', end='')
+    existing_zsts = monitor.get_existing_zsts()
+    dl_ps = start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, n_dl_proc)
     for url, name in to_proc:
-        url_q.put((url, name))
+        zst, _ = parse_url(url)
+        if zst in existing_zsts:
+            zst_q.put((name, zst))
+        else:
+            url_q.put((url, name))
+
     for _ in range(n_dl_proc):
         url_q.put(("DONE", None))
 
     n_dl_done = 0
+
+    offsets = [2 + n_dl_proc + i*(2+n_reader_proc) for i in range(max_active_procs)]
+    nprocessed = 0
+
     try:
         active_procs = []
         terminate = False
@@ -128,11 +164,14 @@ def main(
                 if n_dl_done == n_dl_proc:
                     terminate = True
             else:
-                print_safe(f"{name}: processing zst into {out_dir}...")
+                offset = offsets[nprocessed % len(offsets)]
+                nprocessed += 1
+                print_safe(
+                    f"\033[{offset}H\033[Kzst proc: processing {name} into {out_dir}...", end='\r')
                 cmd = [
                     processor_bin,
                     "--zst",
-                    zst_fn,
+                    os.path.join(monitor.dl_dir, zst_fn),
                     "--name",
                     name,
                     "--outdir",
@@ -143,6 +182,10 @@ def main(
                     str(n_move_proc),
                     "--minSec",
                     str(minSec),
+                    "--procId",
+                    str(offset),
+                    "--printFreq",
+                    "5"
                 ]
                 p = subprocess.Popen(cmd)
                 active_procs.append((p, name, zst_fn))
@@ -151,21 +194,22 @@ def main(
                 finished = False
                 status = p.poll()
                 if status is not None:
-                    if status != 0:
+                    finished = True
+                    if status == 0:
+                        with open(os.path.join(out_dir, "processed.txt"), 'a') as f:
+                            f.write(f"{name}\n")
+                        os.remove(os.path.join(monitor.dl_dir, zst))
+                    else:
                         print_safe(f"{name}: poll returned {status}")
                         _, errs = p.communicate()
                         if errs is not None:
                             print_safe(f"{name}: returned errors:\n{errs}")
-                        return True, status
-                    os.remove(zst)
-                    finished = True
 
                 return finished, status
 
             while len(active_procs) == max_active_procs or (
                 terminate and len(active_procs) > 0
             ):
-                time.sleep(5)
                 for procdata in reversed(active_procs):
                     finished, status = check_cleanup(*procdata)
                     if finished:
@@ -175,7 +219,6 @@ def main(
                                 f"Last archive failed with status {status}, 'terminate' signaled"
                             )
                         active_procs.remove(procdata)
-                        break
 
             if terminate and len(active_procs) == 0:
                 break
