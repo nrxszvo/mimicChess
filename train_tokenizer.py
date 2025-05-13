@@ -93,6 +93,8 @@ def create_fens(pqfile, nwriteprocs, batch_size, fen_fn="fens.raw"):
             if len(fens) == 0:
                 ndone += 1
                 if ndone == nwriteprocs:
+                    if nfen < total:
+                        print(f"Warning: only wrote {nfen} fens out of {total}")
                     break
             else:
                 nfen += len(fens)
@@ -138,7 +140,6 @@ class PgnFenIterator:
 
     def __iter__(self):
         return itertools.chain(self.pgn_iter, self.fen_iter)
-
 
 def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
     tokenizer = Tokenizer(BPE())
@@ -188,6 +189,19 @@ def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
     )
     tokenizer.save(tokenizer_fn)
 
+def train_fen(fen_file, tokenizer_fn="fen_tokenizer.json"):
+    tokenizer = Tokenizer(BPE())
+    tokenizer.pre_tokenizer = Whitespace()
+    trainer = BpeTrainer(
+        special_tokens=[
+            "[ENDOFFEN]",
+        ]
+    )
+    tokenizer.train_from_iterator(
+        FenIterator(fen_file), trainer=trainer
+    )
+    tokenizer.save(tokenizer_fn)
+
 
 if __name__ == "__main__":
     import argparse
@@ -217,6 +231,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--serial", action="store_true", default=False, help="Use serial processing"
     )
+    parser.add_argument("--fen_only", action="store_true", default=False, help="only train on fen data")
     args = parser.parse_args()
 
     if not os.path.exists(args.fen_file):
@@ -229,5 +244,8 @@ if __name__ == "__main__":
         print(f"using existing fen file: {args.fen_file}")
 
     print("training tokenizer...")
-    train_bpe(args.pqfile, args.fen_file, args.batch_size, args.tokenizer_fn)
+    if args.fen_file:
+        train_fen(args.fen_file, args.tokenizer_fn)
+    else:
+        train_bpe(args.pqfile, args.fen_file, args.batch_size, args.tokenizer_fn)
     print(f"tokenizer saved to {args.tokenizer_fn}")
