@@ -16,3 +16,4 @@ dependencies:
       - python-chess
       - tokenizers
       - pyarrow
+      - tiktoken

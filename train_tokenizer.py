@@ -8,7 +8,7 @@ import chess.pgn
 import pyarrow.parquet as pq
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.pre_tokenizers import WhitespaceSplit
 from tokenizers.trainers import BpeTrainer
 
 
@@ -143,7 +143,7 @@ class PgnFenIterator:
 
 def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
     tokenizer = Tokenizer(BPE())
-    tokenizer.pre_tokenizer = Whitespace()
+    tokenizer.pre_tokenizer = WhitespaceSplit()
     trainer = BpeTrainer(
         special_tokens=[
             "[ENDOFFEN]",
@@ -184,14 +184,19 @@ def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
             "[ELO4000]",
         ]
     )
-    tokenizer.train_from_iterator(
-        PgnFenIterator(pqfile, fen_file, batch_size), trainer=trainer
-    )
+    if fen_file:
+        tokenizer.train_from_iterator(
+            PgnFenIterator(pqfile, fen_file, batch_size), trainer=trainer
+        )
+    else:
+        tokenizer.train_from_iterator(
+            PgnIterator(pqfile, batch_size), trainer=trainer
+        )
     tokenizer.save(tokenizer_fn)
 
 def train_fen(fen_file, tokenizer_fn="fen_tokenizer.json"):
     tokenizer = Tokenizer(BPE())
-    tokenizer.pre_tokenizer = Whitespace()
+    tokenizer.pre_tokenizer = WhitespaceSplit()
     trainer = BpeTrainer(
         special_tokens=[
             "[ENDOFFEN]",
@@ -220,7 +225,7 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=100, help="Batch size for processing"
     )
     parser.add_argument(
-        "--fen_file", type=str, default="fens.raw", help="Path to fens file"
+        "--fen_file", type=str, default=None, help="Path to fens file"
     )
     parser.add_argument(
         "--tokenizer_fn",
@@ -234,17 +239,17 @@ if __name__ == "__main__":
     parser.add_argument("--fen_only", action="store_true", default=False, help="only train on fen data")
     args = parser.parse_args()
 
-    if not os.path.exists(args.fen_file):
+    if args.fen_file and not os.path.exists(args.fen_file):
         print("generating fens...")
         if args.serial:
             create_fens_serial(args.pqfile, args.batch_size, args.fen_file)
         else:
             create_fens(args.pqfile, args.nprocs, args.batch_size, args.fen_file)
-    else:
+    elif args.fen_file:
         print(f"using existing fen file: {args.fen_file}")
 
     print("training tokenizer...")
-    if args.fen_file:
+    if args.fen_only:
         train_fen(args.fen_file, args.tokenizer_fn)
     else:
         train_bpe(args.pqfile, args.fen_file, args.batch_size, args.tokenizer_fn)
