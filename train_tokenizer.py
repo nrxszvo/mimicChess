@@ -4,15 +4,35 @@ import os
 import random
 from multiprocessing import Process, Queue
 
+import json
+import regex
 import chess.pgn
 import pyarrow.parquet as pq
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import WhitespaceSplit
 from tokenizers.trainers import BpeTrainer
 
 
-def pgns_to_fens(pgns):
+def chomp_fen(fen):
+    return " ".join(fen.split()[:-2])
+
+
+def pgns_to_all_fens(pgns):
+    games = []
+    for pgn in pgns:
+        fens = []
+        pgn = pgn.as_py()
+        game = chess.pgn.read_game(io.StringIO(pgn))
+        board = game.board()
+        for i, move in enumerate(game.mainline_moves()):
+            fens.append(chomp_fen(board.fen()))
+            board.push(move)
+        games.append(fens)
+
+    return games
+
+
+def pgns_to_fens(pgns, fens_per_game=10):
     fens = []
     for pgn in pgns:
         pgn = pgn.as_py()
@@ -26,24 +46,25 @@ def pgns_to_fens(pgns):
         game = chess.pgn.read_game(io.StringIO(pgn))
         board = game.board()
         r = random.random()
+        n_fen = 0
         for i, move in enumerate(game.mainline_moves()):
             cumsum += minv + i * crem
             if r < cumsum:
-                break
+                fens.append(chomp_fen(board.fen()))
+                n_fen += 1
+                if n_fen == fens_per_game:
+                    break
             board.push(move)
 
-        fens.append(board.fen())
     return fens
 
 
-def pgns_to_fens_proc(inq, outq):
+def pgns_to_fens_proc(inq, outq, fens_per_game=10):
     while True:
         pgns = inq.get()
+        outq.put(pgns_to_all_fens(pgns))
         if len(pgns) == 0:
-            outq.put([])
-            return
-
-        outq.put(pgns_to_fens(pgns))
+            break
 
 
 def add_pgns(pqfile, inq, batch_size, nwriteprocs):
@@ -69,7 +90,7 @@ def create_fens_serial(pqfile, batch_size, fen_fn="fens.raw"):
             print(f"{100*nfen/total:.2f}% done", end="\r")
 
 
-def create_fens(pqfile, nwriteprocs, batch_size, fen_fn="fens.raw"):
+def create_fens(pqfile, nwriteprocs, batch_size, fen_fn="fens.raw", fens_per_game=10):
     inq = Queue()
     outq = Queue()
 
@@ -84,22 +105,23 @@ def create_fens(pqfile, nwriteprocs, batch_size, fen_fn="fens.raw"):
         p.start()
         writeprocs.append(p)
 
-    total = pq.ParquetFile(pqfile).metadata.num_rows
-    nfen = 0
+    total = fens_per_game * pq.ParquetFile(pqfile).metadata.num_rows
+    ngames = 0
     ndone = 0
     with open(fen_fn, "w") as ff:
         while True:
-            fens = outq.get()
-            if len(fens) == 0:
+            games = outq.get()
+            if len(games) == 0:
                 ndone += 1
                 if ndone == nwriteprocs:
-                    if nfen < total:
-                        print(f"Warning: only wrote {nfen} fens out of {total}")
+                    if ngames < total:
+                        print(f"Warning: only wrote {ngames} games out of {total}")
                     break
             else:
-                nfen += len(fens)
-                ff.write("\n".join(fens) + "\n")
-                print(f"{100*nfen/total:.2f}% done", end="\r")
+                ngames += len(games)
+                for game in games:
+                    ff.write("\n".join(game) + "\n")
+                print(f"{100*ngames/total:.2f}% done", end="\r")
 
     add_p.join()
     for p in writeprocs:
@@ -113,24 +135,67 @@ class PgnIterator:
         self.iter = pq.ParquetFile(pqfile).iter_batches(
             batch_size=batch_size, columns=["moves", "clk"]
         )
+        self.pat_str = "O-O-O|O-O|[RNBQK]|[a-h][0-9]|[a-h]|[RNBQKa-h]|[x=+#]|\s"
 
     def __iter__(self):
         for batch in self.iter:
             for pgn, clk in zip(batch["moves"], batch["clk"]):
-                game = ""
-                for mv, tim in zip(pgn.as_py().split(), clk.as_py().split()):
-                    game += tim + " " + mv + " "
+                grps = regex.findall(self.pat_str, pgn.as_py())
+                idx = 0
+                recs = []
+                for mv in pgn.as_py().split():
+                    rec = []
+                    while idx < len(grps):
+                        if grps[idx] == " ":
+                            idx += 1
+                            break
+                        rec.append(grps[idx])
+                        idx += 1
+                    # print(mv.ljust(6), rec)
+                    recs.append(rec)
+                vals = []
+                for val in clk.as_py().split():
+                    e = len(val) - 1
+                    end = e
+                    while val[end] == "0":
+                        end -= 1
+                    for i in range(end + 1):
+                        v = val[i]
+                        vals.append(str(int(v) * 10 ** (e - i)))
+                    vals.append(" ")
+                pidx, gidx = 0, 0
+                game = []
+                while pidx < len(recs):
+                    while gidx < len(vals):
+                        game.append(vals[gidx])
+                        gidx += 1
+                        if vals[gidx] == " ":
+                            gidx += 1
+                            break
+                    game.extend(recs[pidx])
+                    pidx += 1
+
                 yield game
 
 
 class FenIterator:
+    PAT_STR = r"\s[a-h][1-8]|\s[bw\-]|\s[KQkq]+|[/pPrRnNbBqQkK1-8]+"
+
     def __init__(self, fenfile):
         self.fenfile = fenfile
+        self.pat_str_old = r"\s[a-h][1-8]|\s[bw]|\s[qkQK]+|p+|r|n|b|q|k|P+|R|N|B|Q|K|[1-8]|\s[0-9]+|\s-"
+        self.pat_str = (
+            r"\s[a-h][1-8]|\s[bw\-]|\s[KQkq]+|p+|r|n|b|q|k|P+|R|N|B|Q|K|[1-8]"
+        )
+        self.pat_str_new = FenIterator.PAT_STR
 
     def __iter__(self):
         with open(self.fenfile) as f:
             for fen in f:
-                yield fen
+                # grps = regex.findall(self.pat_str_new, fen)
+                # yield grps[0]
+                fen = fen.replace("/", "")
+                yield fen.split()[0]
 
 
 class PgnFenIterator:
@@ -141,16 +206,13 @@ class PgnFenIterator:
     def __iter__(self):
         return itertools.chain(self.pgn_iter, self.fen_iter)
 
+
 def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
     tokenizer = Tokenizer(BPE())
-    tokenizer.pre_tokenizer = WhitespaceSplit()
     trainer = BpeTrainer(
         special_tokens=[
             "[ENDOFFEN]",
             "[NOOP]",
-            "[WHITEWINS]",
-            "[BLACKWINS]",
-            "[DRAW]",
             "[ELO1000]",
             "[ELO1100]",
             "[ELO1200]",
@@ -189,23 +251,22 @@ def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
             PgnFenIterator(pqfile, fen_file, batch_size), trainer=trainer
         )
     else:
-        tokenizer.train_from_iterator(
-            PgnIterator(pqfile, batch_size), trainer=trainer
-        )
+        tokenizer.train_from_iterator(PgnIterator(pqfile, batch_size), trainer=trainer)
     tokenizer.save(tokenizer_fn)
+
 
 def train_fen(fen_file, tokenizer_fn="fen_tokenizer.json"):
     tokenizer = Tokenizer(BPE())
-    tokenizer.pre_tokenizer = WhitespaceSplit()
-    trainer = BpeTrainer(
-        special_tokens=[
-            "[ENDOFFEN]",
-        ]
-    )
-    tokenizer.train_from_iterator(
-        FenIterator(fen_file), trainer=trainer
-    )
-    tokenizer.save(tokenizer_fn)
+    trainer = BpeTrainer(vocab_size=100000)
+    tokenizer.train_from_iterator(FenIterator(fen_file), trainer=trainer)
+    tokenizer.save("ref_" + tokenizer_fn)
+
+    with open("ref_" + tokenizer_fn) as f:
+        data = json.loads(f.read())
+
+    newdata = {"ranks": data["model"]["vocab"], "pat_str": FenIterator.PAT_STR}
+    with open(tokenizer_fn, "w") as f:
+        json.dump(newdata, f)
 
 
 if __name__ == "__main__":
@@ -224,8 +285,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size", type=int, default=100, help="Batch size for processing"
     )
+    parser.add_argument("--fen_file", type=str, default=None, help="Path to fens file")
     parser.add_argument(
-        "--fen_file", type=str, default=None, help="Path to fens file"
+        "--fens_per_game", type=int, default=10, help="Number of fens per game"
     )
     parser.add_argument(
         "--tokenizer_fn",
@@ -236,7 +298,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--serial", action="store_true", default=False, help="Use serial processing"
     )
-    parser.add_argument("--fen_only", action="store_true", default=False, help="only train on fen data")
+    parser.add_argument(
+        "--fen_only", action="store_true", default=False, help="only train on fen data"
+    )
     args = parser.parse_args()
 
     if args.fen_file and not os.path.exists(args.fen_file):
@@ -244,7 +308,13 @@ if __name__ == "__main__":
         if args.serial:
             create_fens_serial(args.pqfile, args.batch_size, args.fen_file)
         else:
-            create_fens(args.pqfile, args.nprocs, args.batch_size, args.fen_file)
+            create_fens(
+                args.pqfile,
+                args.nprocs,
+                args.batch_size,
+                args.fen_file,
+                args.fens_per_game,
+            )
     elif args.fen_file:
         print(f"using existing fen file: {args.fen_file}")
 

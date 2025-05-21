@@ -1,12 +1,12 @@
 {
-    "editor.formatOnSave": true,
+    "editor.formatOnSave": false,
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": true,
     "python.linting.flake8Enabled": true,
     "python.linting.mypyEnabled": true,
     "python.defaultInterpreterPath": "/Users/michaelhorgan/miniconda3/bin/python",
     "[python]": {
-        "editor.formatOnSave": true,
+        "editor.formatOnSave": false,
         "editor.defaultFormatter": "mikoz.black-py"
     },
     "C_Cpp.clang_format_style": "file",
