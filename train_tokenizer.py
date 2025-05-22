@@ -197,6 +197,46 @@ class FenIterator:
                 fen = fen.replace("/", "")
                 yield fen.split()[0]
 
+class MPFenIterator:
+    def __init__(self, pqfile, batch_size, nwriteprocs):
+        self.inq = Queue()
+        self.outq = Queue()
+        self.total = pq.ParquetFile(pqfile).metadata.num_rows
+        self.add_p = Process(target=add_pgns, args=(pqfile, self.inq, batch_size, nwriteprocs))
+        self.add_p.daemon = True
+        self.add_p.start()
+
+        self.writeprocs = []
+        for i in range(nwriteprocs):
+            p = Process(target=pgns_to_fens_proc, args=(self.inq, self.outq))
+            p.daemon = True
+            p.start()
+            self.writeprocs.append(p)
+        self.ngames = 0
+        self.ndone = 0
+
+    def __iter__(self):
+        while True:
+            games = self.outq.get()
+            if len(games) == 0:
+                self.ndone += 1
+                if self.ndone == len(self.writeprocs):
+                    if self.ngames < self.total:
+                        print(f"Warning: only wrote {self.ngames} games out of {self.total}")
+                    break
+            else:
+                self.ngames += len(games)
+                for game in games:
+                    for fen in game:
+                        fen = fen.replace("/", "")
+                        yield fen.split()[0]
+                print(f"{100*self.ngames/self.total:.2f}% done", end="\r")
+
+    def __del__(self):
+        self.add_p.join()
+        for p in self.writeprocs:
+            p.join()
+
 
 class PgnFenIterator:
     def __init__(self, pqfile, fenfile, batch_size):
@@ -255,10 +295,10 @@ def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
     tokenizer.save(tokenizer_fn)
 
 
-def train_fen(fen_file, tokenizer_fn="fen_tokenizer.json"):
+def train_fen(pqfile, batch_size, nwriteprocs, tokenizer_fn="fen_tokenizer.json"):
     tokenizer = Tokenizer(BPE())
-    trainer = BpeTrainer(vocab_size=100000)
-    tokenizer.train_from_iterator(FenIterator(fen_file), trainer=trainer)
+    trainer = BpeTrainer(vocab_size=100000, show_progress=False)
+    tokenizer.train_from_iterator(MPFenIterator(pqfile, batch_size, nwriteprocs), trainer=trainer)
     tokenizer.save("ref_" + tokenizer_fn)
 
     with open("ref_" + tokenizer_fn) as f:
@@ -303,24 +343,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.fen_file and not os.path.exists(args.fen_file):
-        print("generating fens...")
-        if args.serial:
-            create_fens_serial(args.pqfile, args.batch_size, args.fen_file)
-        else:
-            create_fens(
-                args.pqfile,
-                args.nprocs,
-                args.batch_size,
-                args.fen_file,
-                args.fens_per_game,
-            )
-    elif args.fen_file:
-        print(f"using existing fen file: {args.fen_file}")
-
     print("training tokenizer...")
     if args.fen_only:
-        train_fen(args.fen_file, args.tokenizer_fn)
+        train_fen(args.pqfile, args.batch_size, args.nprocs, args.tokenizer_fn)
     else:
         train_bpe(args.pqfile, args.fen_file, args.batch_size, args.tokenizer_fn)
     print(f"tokenizer saved to {args.tokenizer_fn}")
