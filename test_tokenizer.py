@@ -56,10 +56,13 @@ def calc_token_histo(
         else:
             n_samples += len(samples)
             for sample in samples:
-                tokens = tok.encode(sample)
-                n_tokens += len(tokens)
-                histo.update(tokens)
-            # print(histo.most_common(5), end="\r")
+                for fen in sample:
+                    fen = fen.replace("/", "")
+                    fen = fen.split()[0]
+                    tokens = tok.encode(fen)
+                    n_tokens += len(tokens)
+                    histo.update(tokens)
+                # print(histo.most_common(5), end="\r")
             if nloops % 10 == 0:
                 print(f"{n_samples:.2e}, {100*n_samples/total:.3f}% done", end="\r")
 

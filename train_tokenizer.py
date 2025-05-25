@@ -11,13 +11,14 @@ import pyarrow.parquet as pq
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
+from pathlib import Path
 
 
 def chomp_fen(fen):
     return " ".join(fen.split()[:-2])
 
 
-def pgns_to_all_fens(pgns):
+def pgns_to_all_fens(pgns, max_moves=20):
     games = []
     for pgn in pgns:
         fens = []
@@ -25,6 +26,8 @@ def pgns_to_all_fens(pgns):
         game = chess.pgn.read_game(io.StringIO(pgn))
         board = game.board()
         for i, move in enumerate(game.mainline_moves()):
+            if i == max_moves:
+                break
             fens.append(chomp_fen(board.fen()))
             board.push(move)
         games.append(fens)
@@ -233,9 +236,15 @@ class MPFenIterator:
                 print(f"{100*self.ngames/self.total:.2f}% done", end="\r")
 
     def __del__(self):
-        self.add_p.join()
+        try:
+            self.add_p.join(timeout=0.1)
+        except:
+            pass
         for p in self.writeprocs:
-            p.join()
+            try:
+                p.join(timeout=0.1)
+            except:
+                pass
 
 
 class PgnFenIterator:
@@ -299,13 +308,16 @@ def train_fen(pqfile, batch_size, nwriteprocs, tokenizer_fn="fen_tokenizer.json"
     tokenizer = Tokenizer(BPE())
     trainer = BpeTrainer(vocab_size=100000, show_progress=False)
     tokenizer.train_from_iterator(MPFenIterator(pqfile, batch_size, nwriteprocs), trainer=trainer)
-    tokenizer.save("ref_" + tokenizer_fn)
 
-    with open("ref_" + tokenizer_fn) as f:
+    p = Path(tokenizer_fn)
+    ref = p.parent / ("ref_" + p.name)
+    tokenizer.save(ref.expanduser().as_posix())
+
+    with open(ref.expanduser()) as f:
         data = json.loads(f.read())
 
     newdata = {"ranks": data["model"]["vocab"], "pat_str": FenIterator.PAT_STR}
-    with open(tokenizer_fn, "w") as f:
+    with open(p.expanduser(), "w") as f:
         json.dump(newdata, f)
 
 
