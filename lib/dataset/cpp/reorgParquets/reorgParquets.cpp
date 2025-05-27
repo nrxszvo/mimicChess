@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
                     prevProgress = progress;
                 }
             }
-            std::cout << "Finished " << entry.path().parent_path().filename() / entry.path().filename() << std::setw(50) << " " << std::endl;
+            std::cout << "Processed " << gamesProcessed << " games for " << entry.path().parent_path().filename() / entry.path().filename() << std::setw(50) << " " << std::endl;
 
         } catch (const std::exception& e) {
             std::cerr << "Error processing " << entry.path() << ": " << e.what() << std::endl;
