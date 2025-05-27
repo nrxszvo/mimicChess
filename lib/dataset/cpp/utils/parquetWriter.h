@@ -9,7 +9,7 @@ class ParquetWriter {
 public:
     ParquetWriter(std::string root_path);
     ~ParquetWriter();
-    arrow::Result<std::string> write(std::shared_ptr<ParserOutput> res);
+    arrow::Result<std::string> write(std::shared_ptr<ParsedData> res);
 private:
     std::string root_path;
     std::shared_ptr<arrow::Schema> schema;

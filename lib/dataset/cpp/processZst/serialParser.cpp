@@ -1,13 +1,12 @@
 #include "lib/parseMoves.h"
 #include "lib/decompress.h"
 #include "lib/validate.h"
-#include "parser.h"
 #include "utils/utils.h"
 #include "profiling/profiler.h"
 #include "serialParser.h"
 #include <filesystem>
 
-std::shared_ptr<ParserOutput> processSerial(std::string zst) {
+std::shared_ptr<ParsedData> processSerial(std::string zst) {
 
 	std::vector<size_t> frameBoundaries = getFrameBoundaries(zst, 1);
 	DecompressStream decompressor(zst,0,frameBoundaries[1]);
@@ -16,7 +15,7 @@ std::shared_ptr<ParserOutput> processSerial(std::string zst) {
 	int gamestart = 0;
 	int lineno = 0;
 
-	auto output = std::make_shared<ParserOutput>();
+	auto output = std::make_shared<ParsedData>();
 	
 	uintmax_t nbytes = std::filesystem::file_size(zst);	
 	size_t bytesRead;

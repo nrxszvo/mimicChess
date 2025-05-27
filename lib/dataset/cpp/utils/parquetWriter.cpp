@@ -30,7 +30,7 @@ ParquetWriter::ParquetWriter(std::string root_path): root_path(root_path) {
     result_builder = arrow::NumericBuilder<arrow::Int8Type>(pool);
 }
 
-arrow::Result<std::string> ParquetWriter::write(std::shared_ptr<ParserOutput> res) {
+arrow::Result<std::string> ParquetWriter::write(std::shared_ptr<ParsedData> res) {
     mv_builder.Reset();
     clk_builder.Reset();
     welo_builder.Reset();

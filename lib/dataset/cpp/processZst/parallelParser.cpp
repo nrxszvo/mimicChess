@@ -212,7 +212,7 @@ ParallelParser::~ParallelParser() {
 }
 
 int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int printFreq) {
-	std::shared_ptr<ParserOutput> output = std::make_shared<ParserOutput>();
+	std::shared_ptr<ParsedData> output = std::make_shared<ParsedData>();
 	int64_t ngames = 0;
 	int64_t nValidGames = 0;
 	std::vector<int64_t> nGamesLastUpdate(nReaders, 0);
@@ -282,7 +282,7 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 					if (!result.ok()) {
 						throw std::runtime_error("Error writing table: " + result.status().ToString());
 					}
-					output = std::make_shared<ParserOutput>();
+					output = std::make_shared<ParsedData>();
 				}
 
 				int totalGamesEst = ngames / md->progress;

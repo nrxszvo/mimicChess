@@ -1,1 +1,5 @@
-add_library(Utils utils.cpp)
+find_package(Arrow REQUIRED)
+find_package(Parquet REQUIRED)
+add_library(utils utils.cpp parquetReader.cpp parquetWriter.cpp)
+target_link_libraries(utils PUBLIC Arrow::arrow_shared parquet_shared curl)
+target_include_directories(utils PUBLIC "${PROJECT_SOURCE_DIR}/include")

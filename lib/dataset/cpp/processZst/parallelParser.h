@@ -5,8 +5,7 @@
 #include <condition_variable>
 #include <memory>
 #include <thread>
-#include "parser.h"
-#include "parquetWriter.h"
+#include "utils/parquetWriter.h"
 
 struct Data {
 	int pid;

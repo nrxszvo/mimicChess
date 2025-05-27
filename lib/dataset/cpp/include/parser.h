@@ -1,10 +1,9 @@
-#ifndef MC_PARSER_H
-#define MC_PARSER_H
-#include <memory>
+#ifndef PARSER_H 
+#define PARSER_H
 #include <vector>
 #include <string>
 
-struct ParserOutput {
+struct ParsedData {
 	std::vector<int16_t> welos;
 	std::vector<int16_t> belos;
 	std::vector<int16_t> timeCtl;
