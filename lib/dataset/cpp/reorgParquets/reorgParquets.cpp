@@ -18,6 +18,7 @@ ABSL_FLAG(std::string, output_dir, "", "Output directory for reorganized files")
 ABSL_FLAG(std::string, elo_edges, "1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,4000",
           "Comma-separated list of Elo rating edges for organizing games");
 ABSL_FLAG(int64_t, row_group_size, 1024, "Number of rows per row group");
+ABSL_FLAG(bool, remove_after_processing, false, "Delete original parquet files after processing");
 
 // Helper function to parse Elo edges
 std::vector<int> ParseEloEdges(const std::string& elo_edges_str) {
@@ -52,6 +53,16 @@ int main(int argc, char* argv[]) {
     std::string output_dir = absl::GetFlag(FLAGS_output_dir);
     auto elo_edges = ParseEloEdges(absl::GetFlag(FLAGS_elo_edges));
     int64_t rowGroupSize = absl::GetFlag(FLAGS_row_group_size);
+    bool removeAfterProcessing = absl::GetFlag(FLAGS_remove_after_processing);
+
+    if (removeAfterProcessing) {
+        std::cout << "Warning: Input files will be deleted after processing. Continue? (y/N) ";
+        char response;
+        std::cin >> std::noskipws >> response;
+        if (response != 'y' && response != 'Y') {
+            return 0;
+        }
+    }
 
     if (input_dir.empty() || output_dir.empty()) {
         std::cerr << "Error: Both input and output directories must be specified.\n";
@@ -134,6 +145,9 @@ int main(int argc, char* argv[]) {
                 }
             }
             std::cout << "Processed " << gamesProcessed << " games for " << entry.path().parent_path().filename() / entry.path().filename() << std::setw(50) << " " << std::endl;
+            if (removeAfterProcessing) {
+                std::remove(entry.path().string().c_str());
+            }
 
         } catch (const std::exception& e) {
             std::cerr << "Error processing " << entry.path() << ": " << e.what() << std::endl;
