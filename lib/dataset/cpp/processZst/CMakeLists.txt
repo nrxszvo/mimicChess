@@ -1,5 +1,5 @@
 project(ProcessZst)
-add_executable(processZst processZst.cpp parallelParser.cpp serialParser.cpp)
+add_executable(processZst processZst.cpp parallelParser.cpp serialParser.cpp eloWriter.cpp)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 find_package(absl REQUIRED PATHS /opt/homebrew/lib/cmake/absl)
 if(NOT CMAKE_BUILD_TYPE)

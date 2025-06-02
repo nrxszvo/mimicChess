@@ -199,8 +199,8 @@ std::vector<std::shared_ptr<std::thread> >  startProcessorThreads(
 	return threads;
 }
 
-ParallelParser::ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::string root_path, size_t chunkSize) 
-	: nReaders(nReaders), nMoveProcessors(nMoveProcessors), minSec(minSec), maxSec(maxSec), maxInc(maxInc), writer(root_path), chunkSize(chunkSize) {};
+ParallelParser::ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::shared_ptr<EloWriter> writer, size_t chunkSize) 
+	: nReaders(nReaders), nMoveProcessors(nMoveProcessors), minSec(minSec), maxSec(maxSec), maxInc(maxInc), writer(writer), chunkSize(chunkSize) {};
 
 ParallelParser::~ParallelParser() {
 	for (auto gt: gameThreads) {
@@ -278,10 +278,7 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 				nValidGames++;
 		
 				if (nValidGames % chunkSize == 0) {
-					auto result = writer.write(output);
-					if (!result.ok()) {
-						throw std::runtime_error("Error writing table: " + result.status().ToString());
-					}
+					writer->queueBatch(output);
 					output = std::make_shared<ParsedData>();
 				}
 
@@ -296,7 +293,7 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 					std::string status = "\t" + name + "." + std::to_string(md->pid) + ": " + std::to_string(int(100*md->progress)) + \
 										"% done, games/sec: " + std::to_string(gamesPerSec) + ", eta: " + eta;
 					int offset = procId + md->pid + 1;
-					std::string cursorJump = "\033[" + std::to_string(offset) + "H\033[2K";
+					std::string cursorJump = "\033[" + std::to_string(offset) + "H\033[K";
 					std::cout << cursorJump << status << "\r";
 					std::cout.flush();
 				}
@@ -305,9 +302,9 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 			}
 		}
 	}
-	auto result = writer.write(output);
-	if (!result.ok()) {
-		throw std::runtime_error("Error writing table: " + result.status().ToString());
+	if (output->result.size() > 0) {
+		writer->queueBatch(output);
 	}
+
 	return nValidGames;
 }

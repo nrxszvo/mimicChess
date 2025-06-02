@@ -6,7 +6,7 @@ import subprocess
 import time
 from multiprocessing import Lock, Process, Queue
 
-devnull = open(os.devnull, 'w')
+devnull = open(os.devnull, "w")
 
 
 class PrintSafe:
@@ -73,7 +73,7 @@ class Monitor:
 
     def should_sleep(self):
         zsts = self.get_existing_zsts()
-        return len(zsts) >= 2*self.max_active_procs
+        return len(zsts) >= 2 * self.max_active_procs
 
 
 def download_proc(pid, dl_start, url_q, zst_q, print_safe, monitor):
@@ -86,21 +86,31 @@ def download_proc(pid, dl_start, url_q, zst_q, print_safe, monitor):
         zst, _ = parse_url(url)
         if not os.path.exists(os.path.join(monitor.dl_dir, zst)):
             while monitor.should_sleep():
-                print_safe(f"\033[{line}H\033[Kdl proc: sleeping...", end='\r')
+                print_safe(f"\033[{line}H\033[Kdl proc: sleeping...", end="\r")
                 time.sleep(5)
-            print_safe(f"\033[{line}H\033[Kdl proc: downloading {name}", end='\r')
-            _, time_str = timeit(lambda: subprocess.call(
-                ["wget", "-nv", url], cwd=monitor.dl_dir, stdout=devnull, stderr=devnull))
+            print_safe(f"\033[{line}H\033[Kdl proc: downloading {name}", end="\r")
+            _, time_str = timeit(
+                lambda: subprocess.call(
+                    ["wget", "-nv", url],
+                    cwd=monitor.dl_dir,
+                    stdout=devnull,
+                    stderr=devnull,
+                )
+            )
             print_safe(
-                f"\033[{line}H\033[Kdl proc: finished downloading {name} in {time_str}", end='\r')
+                f"\033[{line}H\033[Kdl proc: finished downloading {name} in {time_str}",
+                end="\r",
+            )
         zst_q.put((name, zst))
 
 
 def start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, nproc):
     procs = []
     for pid in range(nproc):
-        p = Process(target=download_proc, args=(
-            pid, dl_start, url_q, zst_q, print_safe, monitor))
+        p = Process(
+            target=download_proc,
+            args=(pid, dl_start, url_q, zst_q, print_safe, monitor),
+        )
         p.daemon = True
         p.start()
         procs.append(p)
@@ -127,16 +137,12 @@ def main(
 
     print_safe = PrintSafe()
     os.makedirs("tmp_zst", exist_ok=True)
-    zst_list = [fn.split('/')[-1] for fn, _ in to_proc]
-    monitor = Monitor('tmp_zst', max_active_procs, zst_list)
+    zst_list = [fn.split("/")[-1] for fn, _ in to_proc]
+    monitor = Monitor("tmp_zst", max_active_procs, zst_list)
 
     dl_start = 1
-    dl_height = 1
-    parse_start = dl_start + n_dl_proc*dl_height + 1
-    parse_height = n_reader_proc
-    screen_height = n_dl_proc*dl_height + 1 + max_active_procs*(parse_height+1)
 
-    print('\033[2J', end='')
+    print("\033[2J", end="")
     existing_zsts = monitor.get_existing_zsts()
     dl_ps = start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, n_dl_proc)
     for url, name in to_proc:
@@ -151,7 +157,7 @@ def main(
 
     n_dl_done = 0
 
-    offsets = [2 + n_dl_proc + i*(2+n_reader_proc) for i in range(max_active_procs)]
+    offsets = [2 + n_dl_proc + i * (2 + n_reader_proc) for i in range(max_active_procs)]
     nprocessed = 0
 
     try:
@@ -167,7 +173,8 @@ def main(
                 offset = offsets[nprocessed % len(offsets)]
                 nprocessed += 1
                 print_safe(
-                    f"\033[{offset}H\033[Kzst proc: processing {name} into {out_dir}...", end='\r')
+                    f"\033[{offset}H\033[Kzst proc: processing {name}...", end="\r"
+                )
                 cmd = [
                     processor_bin,
                     "--zst",
@@ -185,7 +192,7 @@ def main(
                     "--procId",
                     str(offset),
                     "--printFreq",
-                    "5"
+                    "5",
                 ]
                 p = subprocess.Popen(cmd)
                 active_procs.append((p, name, zst_fn))
@@ -196,7 +203,7 @@ def main(
                 if status is not None:
                     finished = True
                     if status == 0:
-                        with open(os.path.join(out_dir, "processed.txt"), 'a') as f:
+                        with open(os.path.join(out_dir, "processed.txt"), "a") as f:
                             f.write(f"{name}\n")
                         os.remove(os.path.join(monitor.dl_dir, zst))
                     else:

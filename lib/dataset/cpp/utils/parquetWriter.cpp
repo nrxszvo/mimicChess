@@ -76,7 +76,7 @@ arrow::Result<std::string> ParquetWriter::write(std::shared_ptr<ParsedData> res)
     return root_path;
 }
 
-ParquetWriter::~ParquetWriter() {
+void ParquetWriter::close() {
     PARQUET_THROW_NOT_OK(parquet_writer->Close());
     PARQUET_THROW_NOT_OK(outfile->Close());
 }

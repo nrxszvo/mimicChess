@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include <memory>
 #include <thread>
-#include "utils/parquetWriter.h"
+#include "eloWriter.h"
 
 struct Data {
 	int pid;
@@ -74,10 +74,10 @@ class ParallelParser {
 	int maxInc;
 	std::vector<std::shared_ptr<std::thread> > procThreads;
 	std::vector<std::shared_ptr<std::thread> > gameThreads;
-	ParquetWriter writer;
+	std::shared_ptr<EloWriter> writer;
 	size_t chunkSize;
 public:
-	ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::string root_path, size_t chunkSize);
+	ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::shared_ptr<EloWriter> writer, size_t chunkSize);
 	~ParallelParser();
 	int64_t parse(std::string zst, std::string name, int procId, int printFreq=60);
 };
