@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <memory>
 #include <thread>
+#include <functional>
 #include "eloWriter.h"
 
 struct Data {
@@ -78,6 +79,5 @@ class ParallelParser {
 	size_t chunkSize;
 public:
 	ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::shared_ptr<EloWriter> writer, size_t chunkSize);
-	~ParallelParser();
-	int64_t parse(std::string zst, std::string name, int procId, int printFreq=60);
+	int64_t parse(std::string zst, std::string name, int offset, int printFreq, std::mutex& print_mtx);
 };

@@ -24,7 +24,7 @@ public:
                         if (stop_ && tasks_.empty()) {
                             return;
                         }
-                        task = move(tasks_.front());
+                        task = tasks_.front();
                         tasks_.pop();
                     }
 

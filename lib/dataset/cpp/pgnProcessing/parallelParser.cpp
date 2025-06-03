@@ -1,6 +1,6 @@
 #include "parallelParser.h"
-#include "lib/decompress.h"
-#include "lib/parseMoves.h"
+#include "decompress.h"
+#include "parseMoves.h"
 #include "parser.h"
 #include "utils/utils.h"
 #include <stdexcept>
@@ -202,16 +202,8 @@ std::vector<std::shared_ptr<std::thread> >  startProcessorThreads(
 ParallelParser::ParallelParser(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::shared_ptr<EloWriter> writer, size_t chunkSize) 
 	: nReaders(nReaders), nMoveProcessors(nMoveProcessors), minSec(minSec), maxSec(maxSec), maxInc(maxInc), writer(writer), chunkSize(chunkSize) {};
 
-ParallelParser::~ParallelParser() {
-	for (auto gt: gameThreads) {
-		gt->join();
-	}
-	for (auto rt: procThreads) {
-		rt->join();
-	}
-}
 
-int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int printFreq) {
+int64_t ParallelParser::parse(std::string zst, std::string name, int offset, int printFreq, std::mutex& print_mtx) {
 	std::shared_ptr<ParsedData> output = std::make_shared<ParsedData>();
 	int64_t ngames = 0;
 	int64_t nValidGames = 0;
@@ -247,7 +239,7 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 
 	auto start = hrc::now();
 	auto lastPrintTime = std::vector<hrc::time_point>(nReaders, start);
-
+		
 	while (ngames < totalGames || nFinished < nMoveProcessors) {
 		std::shared_ptr<MoveDataBlock> moves;
 		{
@@ -292,10 +284,13 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 					
 					std::string status = "\t" + name + "." + std::to_string(md->pid) + ": " + std::to_string(int(100*md->progress)) + \
 										"% done, games/sec: " + std::to_string(gamesPerSec) + ", eta: " + eta;
-					int offset = procId + md->pid + 1;
-					std::string cursorJump = "\033[" + std::to_string(offset) + "H\033[K";
-					std::cout << cursorJump << status << "\r";
-					std::cout.flush();
+					int thisOffset = offset + md->pid + 1;
+					std::string cursorJump = "\033[" + std::to_string(thisOffset) + "H\033[K";
+					{
+                        std::lock_guard<std::mutex> lock(print_mtx);
+						std::cout << cursorJump << status << "\r";
+						std::cout.flush();
+					}
 				}
 			} else {
 				throw std::runtime_error("invalid code: " + md->info);
@@ -305,6 +300,11 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int procId, int
 	if (output->result.size() > 0) {
 		writer->queueBatch(output);
 	}
-
+	for (auto gt: gameThreads) {
+		gt->join();
+	}
+	for (auto rt: procThreads) {
+		rt->join();
+	}
 	return nValidGames;
 }
