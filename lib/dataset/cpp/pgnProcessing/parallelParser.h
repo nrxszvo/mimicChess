@@ -20,7 +20,7 @@ struct Data {
 
 	Data() {};
 	Data(int pid, std::string info): pid(pid), info(info) {};
-	Data(int pid, std::string info, int gameId): pid(pid), info(info), gameId(gameId) {};
+	Data(int pid, std::string info, int gameId): pid(pid), gameId(gameId), info(info) {};
 	Data(int pid, float progress, int gid, int welo, int belo, int time, int inc, std::string info)
 		: pid(pid), progress(progress), gameId(gid), welo(welo), belo(belo), time(time), inc(inc), info(info) {};
 	Data(int pid, std::shared_ptr<Data> other)

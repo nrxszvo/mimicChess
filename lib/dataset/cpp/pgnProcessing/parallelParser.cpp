@@ -274,8 +274,8 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int offset, int
 					output = std::make_shared<ParsedData>();
 				}
 
-				int totalGamesEst = ngames / md->progress;
 				if (ellapsedGTE(lastPrintTime[md->pid], printFreq)) {
+					int totalGamesEst = ngames / md->progress;
 					auto [eta, now] = getEta(totalGamesEst, ngames, start);
 					long ellapsed = std::chrono::duration_cast<milli>(now-lastPrintTime[md->pid]).count();
 					int gamesPerSec = 1000*(ngames-nGamesLastUpdate[md->pid])/ellapsed;
@@ -288,8 +288,7 @@ int64_t ParallelParser::parse(std::string zst, std::string name, int offset, int
 					std::string cursorJump = "\033[" + std::to_string(thisOffset) + "H\033[K";
 					{
                         std::lock_guard<std::mutex> lock(print_mtx);
-						std::cout << cursorJump << status << "\r";
-						std::cout.flush();
+						std::cout << cursorJump << status << "\r" << std::flush;
 					}
 				}
 			} else {

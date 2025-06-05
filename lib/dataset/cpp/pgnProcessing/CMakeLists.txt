@@ -1,17 +1,43 @@
-add_library(pgnProcessing eloWriter.cpp parallelParser.cpp parseMoves.cpp decompress.cpp)
-target_link_libraries(utils)
-target_include_directories(pgnProcessing PUBLIC "${PROJECT_SOURCE_DIR}")
-target_include_directories(pgnProcessing PUBLIC "${PROJECT_SOURCE_DIR}/include")
+# Build as a shared library for Python bindings
+add_library(pgnProcessing SHARED
+    eloWriter.cpp
+    parallelParser.cpp
+    parseMoves.cpp
+    decompress.cpp
+)
+
+# Link against utils library
+target_link_libraries(pgnProcessing PRIVATE utils)
+
+# Include directories
+target_include_directories(pgnProcessing PUBLIC
+    "${PROJECT_SOURCE_DIR}"
+    "${PROJECT_SOURCE_DIR}/include"
+)
+
+# System-specific settings
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-	set(CMAKE_PREFIXPATH /opt/homebrew)
+    set(CMAKE_PREFIXPATH /opt/homebrew)
+    # Make sure RPATH is set correctly for macOS
+    set_target_properties(pgnProcessing PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "@loader_path"
+    )
 endif()
 
+# Find and link dependencies
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
-target_link_libraries(pgnProcessing PUBLIC Arrow::arrow_shared parquet_shared curl)
-
 find_package(zstd REQUIRED)
-target_link_libraries(pgnProcessing PRIVATE zstd::libzstd)
-
 find_package(re2 REQUIRED)
-target_link_libraries(pgnProcessing PRIVATE re2::re2)
+
+# Link dependencies
+target_link_libraries(pgnProcessing
+    PUBLIC
+        Arrow::arrow_shared
+        parquet_shared
+        curl
+    PRIVATE
+        zstd::libzstd
+        re2::re2
+)

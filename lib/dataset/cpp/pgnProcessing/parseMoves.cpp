@@ -4,7 +4,6 @@
 #include <re2/re2.h>
 #include <tuple>
 #include "parseMoves.h"
-#include "profiling/profiler.h"
 
 using namespace std;
 
@@ -60,10 +59,8 @@ tuple<string, string, string, int8_t> parseMoves(string moveStr) {
 	
 	while (idx < moveStr.size()) {
 		string ss = nextMoveStr(moveStr, idx, curmv);
-		profiler.start("regex");
 		string wm="", bm="", weval="", wclk="", beval="", bclk="";
 		re2::RE2::PartialMatch(ss, fullMovePat, &wm, &weval, &wclk, &bm, &beval, &bclk);
-		profiler.stop("regex");
 
 		if (idx == moveStr.size()) {
 			string res;

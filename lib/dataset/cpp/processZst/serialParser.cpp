@@ -2,7 +2,6 @@
 #include "lib/decompress.h"
 #include "lib/validate.h"
 #include "utils/utils.h"
-#include "profiling/profiler.h"
 #include "serialParser.h"
 #include <filesystem>
 
@@ -24,10 +23,6 @@ std::shared_ptr<ParsedData> processSerial(std::string zst) {
 	int progress = 0;
 	int printFreq = 10;
 
-	profiler.init("parseMoves");
-	profiler.init("regex");
-	profiler.init("decompress");
-
 	auto start = hrc::now();
 	while((bytesRead = decompressor.decompressFrame()) != 0) {
 		std::vector<std::string> lines;
@@ -37,9 +32,7 @@ std::shared_ptr<ParsedData> processSerial(std::string zst) {
 			lineno++;
 			std::string code = processor.processLine(line);		
 			if (code == "COMPLETE") {
-				profiler.start("parseMoves");
 				auto [moves, clk, eval, result] = parseMoves(processor.getMoveStr());
-				profiler.stop("parseMoves");
 				output->welos.push_back(processor.getWelo());
 				output->belos.push_back(processor.getBelo());
 				output->timeCtl.push_back(processor.getTime());

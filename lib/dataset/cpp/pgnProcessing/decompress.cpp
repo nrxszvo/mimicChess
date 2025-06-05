@@ -3,7 +3,6 @@
 #include <string>
 #include <filesystem>
 #include "decompress.h"
-#include "profiling/profiler.h"
 
 #define MAGIC 0xFD2FB528
 
@@ -72,7 +71,6 @@ DecompressStream::~DecompressStream() {
 std::streamsize DecompressStream::decompressFrame() {
 	if (totalRead >= maxBytes) return 0;
 
-	profiler.start("decompress");
 	size_t bytesToRead = std::min(frameSize, maxBytes-totalRead);
 	infile.read(static_cast<char*>(in_mem), bytesToRead);
 	std::streamsize bytesRead = infile.gcount();
@@ -98,7 +96,6 @@ std::streamsize DecompressStream::decompressFrame() {
 			break;
 		}
 	}
-	profiler.stop("decompress");
 	return bytesRead;
 }
 

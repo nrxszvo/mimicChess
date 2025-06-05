@@ -14,10 +14,11 @@
 class ParserPool {
 public:
     ParserPool(int nReaders, int nMoveProcessors, int minSec, int maxSec, int maxInc, std::string outdir, std::string elo_edges, size_t chunkSize, int printFreq, size_t numThreads, int printOffset)
+        : stop_(false), curProcess(0), nCompleted(0)
     {
 		writer = std::make_shared<EloWriter>(outdir, elo_edges, chunkSize);
-        std::cout << "\033[2J";
-        auto to_bottom = [&] { return "\033[0H\033[" + std::to_string(printOffset + 1 + (numThreads-1) * (2+nReaders)) + "B"; };
+        std::cout << "\033[2J" << std::flush;
+        threads_.reserve(numThreads);
         for (size_t procId = 0; procId < numThreads; ++procId) {
             threads_.emplace_back([=, this] {
                 int thisProc;
@@ -41,7 +42,7 @@ public:
                     auto offset = printOffset + procId * (2+nReaders);
                     {
                         std::lock_guard<std::mutex> lock(print_mutex_);
-                        std::cout << "\033[" << offset << "H\033[K" << thisProc << ": parsing " << name << "...";
+                        std::cout << "\033[" << offset << "H\033[K" << thisProc << ": parsing " << name << "..." << std::flush;
                     }
                     auto ngames = parser.parse(zst, name, offset, printFreq, print_mutex_);
                     auto stop = std::chrono::high_resolution_clock::now();
@@ -51,7 +52,8 @@ public:
                         for (int i = 1; i <= nReaders; i++) {
                             std::cout << "\033[" << i + offset << "H\033[K";
                         }
-                        std::cout << "\033[" << printOffset + numThreads * (2+nReaders) << "H";
+                        std::cout << "\033[" << printOffset + numThreads * (2+nReaders) << "H" << std::flush;
+                        nCompleted++;
                     }
                 }
             });
@@ -76,6 +78,10 @@ public:
         cv_.notify_one();
     }
 
+    int numCompleted() {
+        return nCompleted;
+    }
+
 private:
     std::shared_ptr<EloWriter> writer;
     std::vector<std::thread> threads_;
@@ -83,8 +89,9 @@ private:
     std::mutex queue_mutex_;
     std::mutex print_mutex_;
     std::condition_variable cv_;
-    bool stop_ = false;
-    int curProcess = 0;
+    bool stop_;
+    int curProcess;
+    int nCompleted;
 };
 
 #endif
