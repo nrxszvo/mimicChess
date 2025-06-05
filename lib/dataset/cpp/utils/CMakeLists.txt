@@ -19,7 +19,7 @@ target_link_libraries(utils
 # Include directories
 target_include_directories(utils
     PUBLIC
-        "${PROJECT_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}"
 )
 
 # Set RPATH for macOS

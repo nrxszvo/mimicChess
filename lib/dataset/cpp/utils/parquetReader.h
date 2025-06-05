@@ -8,17 +8,13 @@
 #include <string>
 #include <vector>
 #include <functional>
-#include "parser.h"
+#include "include/parser.h"
 
 
 class ParquetReader {
 public:
-    // Open the file
     arrow::Status Open(const std::string& file_path);
-
-    // Read file in batches with callback
     arrow::Status ReadBatch(ParsedData& batch);
-
     int64_t numRows();
 
 private:
