@@ -1,6 +1,3 @@
-[submodule "lib/dataset/cpp/zstd"]
-	path = lib/dataset/cpp/zstd
-	url = git@github.com:facebook/zstd.git
 [submodule "lib/pgnutils"]
 	path = lib/pgnutils
 	url = git@github.com:nrxszvo/pgnutils.git
