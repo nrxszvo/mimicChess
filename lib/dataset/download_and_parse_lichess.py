@@ -1,10 +1,11 @@
 import argparse
-import sys
 import os
 import re
-import subprocess
 import time
+import subprocess
 from multiprocessing import Lock, Process, Queue
+import threading
+from pzp import ParserPool
 
 devnull = open(os.devnull, "w")
 
@@ -43,12 +44,20 @@ def collect_existing(out_dir):
     return existing
 
 
+def name_from_zst(zst):
+    return re.match(r".+standard_rated_([0-9\-]+)\.pgn\.zst", zst).group(1)
+
+
+def zst_from_name(name):
+    return f"lichess_db_standard_rated_{name}.pgn.zst"
+
+
 def collect_remaining(list_fn, out_dir):
     existing = collect_existing(out_dir)
     to_proc = []
     with open(list_fn) as f:
         for line in f:
-            name = re.match(r".+standard_rated_([0-9\-]+)\.pgn\.zst", line).group(1)
+            name = name_from_zst(line)
             if name not in existing:
                 to_proc.append((line.rstrip(), name))
     return to_proc
@@ -64,6 +73,7 @@ def parse_url(url):
 class Monitor:
     def __init__(self, dl_dir, max_active_procs, zst_list):
         self.dl_dir = dl_dir
+        os.makedirs(self.dl_dir, exist_ok=True)
         self.max_active_procs = max_active_procs
         self.zst_list = zst_list
 
@@ -117,15 +127,27 @@ def start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, nproc):
     return procs
 
 
+def remove_completed(dl_dir, parser_pool, total, sleep=5):
+    while True:
+        time.sleep(sleep)
+        completed = parser_pool.get_completed()
+        for name in completed:
+            zst = zst_from_name(name.decode("utf-8"))
+            if os.path.exists(os.path.join(dl_dir, zst)):
+                os.remove(os.path.join(dl_dir, zst))
+        if len(completed) == total:
+            break
+
+
 def main(
     list_fn,
     out_dir,
-    processor_bin,
     n_dl_proc,
     max_active_procs,
     n_reader_proc,
     n_move_proc,
     minSec,
+    elo_edges,
 ):
     to_proc = collect_remaining(list_fn, out_dir)
     if len(to_proc) == 0:
@@ -136,15 +158,38 @@ def main(
     zst_q = Queue()
 
     print_safe = PrintSafe()
-    os.makedirs("tmp_zst", exist_ok=True)
     zst_list = [fn.split("/")[-1] for fn, _ in to_proc]
-    monitor = Monitor("tmp_zst", max_active_procs, zst_list)
+
+    pool = ParserPool(
+        nSimultaneous=max_active_procs,
+        nReadersPerFile=n_reader_proc,
+        nParsersPerFile=n_move_proc,
+        minSec=minSec,
+        maxSec=10800,
+        maxInc=600,
+        elo_edges=elo_edges,
+        chunkSize=1024 * 1024,
+        printFreq=1,
+        printOffset=2 + n_dl_proc,
+        outdir=out_dir,
+    )
+
+    monitor = Monitor(os.path.join(out_dir, "tmp_zst"), max_active_procs, zst_list)
+
+    rc_thread = threading.Thread(
+        target=remove_completed,
+        args=(monitor.dl_dir, pool, len(to_proc)),
+    )
+    rc_thread.start()
 
     dl_start = 1
 
     print("\033[2J", end="")
-    existing_zsts = monitor.get_existing_zsts()
+
     dl_ps = start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, n_dl_proc)
+
+    existing_zsts = monitor.get_existing_zsts()
+
     for url, name in to_proc:
         zst, _ = parse_url(url)
         if zst in existing_zsts:
@@ -157,84 +202,19 @@ def main(
 
     n_dl_done = 0
 
-    offsets = [2 + n_dl_proc + i * (2 + n_reader_proc) for i in range(max_active_procs)]
-    nprocessed = 0
-
     try:
-        active_procs = []
-        terminate = False
         while True:
             name, zst_fn = zst_q.get()
             if name == "DONE":
                 n_dl_done += 1
                 if n_dl_done == n_dl_proc:
-                    terminate = True
+                    break
             else:
-                offset = offsets[nprocessed % len(offsets)]
-                nprocessed += 1
-                print_safe(
-                    f"\033[{offset}H\033[Kzst proc: processing {name}...", end="\r"
-                )
-                cmd = [
-                    processor_bin,
-                    "--zst",
-                    os.path.join(monitor.dl_dir, zst_fn),
-                    "--name",
-                    name,
-                    "--outdir",
-                    os.path.join(out_dir, name),
-                    "--nReaders",
-                    str(n_reader_proc),
-                    "--nMoveProcessors",
-                    str(n_move_proc),
-                    "--minSec",
-                    str(minSec),
-                    "--procId",
-                    str(offset),
-                    "--printFreq",
-                    "5",
-                ]
-                p = subprocess.Popen(cmd)
-                active_procs.append((p, name, zst_fn))
-
-            def check_cleanup(p, name, zst):
-                finished = False
-                status = p.poll()
-                if status is not None:
-                    finished = True
-                    if status == 0:
-                        with open(os.path.join(out_dir, "processed.txt"), "a") as f:
-                            f.write(f"{name}\n")
-                        os.remove(os.path.join(monitor.dl_dir, zst))
-                    else:
-                        print_safe(f"{name}: poll returned {status}")
-                        _, errs = p.communicate()
-                        if errs is not None:
-                            print_safe(f"{name}: returned errors:\n{errs}")
-
-                return finished, status
-
-            while len(active_procs) == max_active_procs or (
-                terminate and len(active_procs) > 0
-            ):
-                for procdata in reversed(active_procs):
-                    finished, status = check_cleanup(*procdata)
-                    if finished:
-                        if status > 0:
-                            terminate = True
-                            print_safe(
-                                f"Last archive failed with status {status}, 'terminate' signaled"
-                            )
-                        active_procs.remove(procdata)
-
-            if terminate and len(active_procs) == 0:
-                break
+                pool.enqueue(os.path.join(monitor.dl_dir, zst_fn), name)
 
     finally:
         print_safe("cleaning up...")
-        for p, _, zst in active_procs:
-            p.kill()
-            # os.remove(zst)
+        pool.join()
         url_q.close()
         zst_q.close()
         for dl_p in dl_ps:
@@ -243,7 +223,8 @@ def main(
             except Exception as e:
                 print(e)
                 dl_p.kill()
-        for fn in os.listdir("."):
+        rc_thread.join()
+        for fn in os.listdir(monitor.dl_dir):
             if re.match(r"lichess_db_standard_rated.*\.zst.*\.tmp", fn):
                 os.remove(fn)
 
@@ -262,11 +243,6 @@ if __name__ == "__main__":
         help="txt file containing list of pgn zips to download and parse",
     )
     parser.add_argument("--outdir", default=".", help="folder to save parquet files")
-    parser.add_argument(
-        "--processor",
-        default="cpp/build/processZst/processZst",
-        help="zst/pgn processor binary",
-    )
     parser.add_argument(
         "--n_dl_procs",
         default=2,
@@ -297,16 +273,21 @@ if __name__ == "__main__":
         help="minimum time control for games in seconds",
         type=int,
     )
+    parser.add_argument(
+        "--elo_edges",
+        default="1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,4000",
+        help="Elo rating buckets",
+    )
 
     args = parser.parse_args()
 
     main(
         list_fn=args.list,
         out_dir=args.outdir,
-        processor_bin=args.processor,
         n_dl_proc=args.n_dl_procs,
         max_active_procs=args.n_active_procs,
         n_reader_proc=args.n_reader_procs,
         n_move_proc=args.n_move_procs,
         minSec=args.min_seconds,
+        elo_edges=args.elo_edges,
     )
