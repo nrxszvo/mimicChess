@@ -39,7 +39,7 @@ def collect_existing(out_dir):
     if os.path.exists(procfn):
         with open(procfn) as f:
             for line in f:
-                name = line.rstrip()
+                name = line.split(',')[0]
                 existing.append(name)
     return existing
 
@@ -127,16 +127,28 @@ def start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, nproc):
     return procs
 
 
-def remove_completed(dl_dir, parser_pool, total, sleep=5):
-    while True:
-        time.sleep(sleep)
-        completed = parser_pool.get_completed()
-        for name in completed:
-            zst = zst_from_name(name.decode("utf-8"))
-            if os.path.exists(os.path.join(dl_dir, zst)):
-                os.remove(os.path.join(dl_dir, zst))
-        if len(completed) == total:
-            break
+def remove_completed(outdir, dl_dir, parser_pool, total, sleep=5):
+    logfile = os.path.join(outdir, 'processed.txt')
+    processed = set()
+    if os.path.exists(logfile):
+        with open(logfile) as f:
+            for line in f:
+                name = line.split(',')[0]
+                processed.add(name)
+
+    with open(logfile, 'a') as f: 
+        while True:
+            time.sleep(sleep)
+            completed = parser_pool.get_completed()
+            for name, ngames in completed:
+                if name not in processed:
+                    processed.add(name)
+                    f.write(f'{name},{ngames}\n')
+                zst = zst_from_name(name)
+                if os.path.exists(os.path.join(dl_dir, zst)):
+                    os.remove(os.path.join(dl_dir, zst))
+            if len(completed) == total:
+                break
 
 
 def main(
@@ -178,7 +190,7 @@ def main(
 
     rc_thread = threading.Thread(
         target=remove_completed,
-        args=(monitor.dl_dir, pool, len(to_proc)),
+        args=(out_dir, monitor.dl_dir, pool, len(to_proc)),
     )
     rc_thread.start()
 
@@ -208,13 +220,13 @@ def main(
             if name == "DONE":
                 n_dl_done += 1
                 if n_dl_done == n_dl_proc:
+                    pool.join()
                     break
             else:
                 pool.enqueue(os.path.join(monitor.dl_dir, zst_fn), name)
 
     finally:
         print_safe("cleaning up...")
-        pool.join()
         url_q.close()
         zst_q.close()
         for dl_p in dl_ps:
