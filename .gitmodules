@@ -1,3 +1,0 @@
-[submodule "lib/pgnutils"]
-	path = lib/pgnutils
-	url = git@github.com:nrxszvo/pgnutils.git
