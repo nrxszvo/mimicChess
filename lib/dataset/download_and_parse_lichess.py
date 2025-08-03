@@ -1,36 +1,22 @@
 import argparse
+from pathlib import Path
 import os
 import re
 import time
 import subprocess
-from multiprocessing import Lock, Process, Queue
 import threading
 from pzp import ParserPool
 
 devnull = open(os.devnull, "w")
 
 
-class PrintSafe:
-    def __init__(self):
-        self.lock = Lock()
-
-    def __call__(self, *args, **kwargs):
-        self.lock.acquire()
-        try:
-            print(*args, **kwargs, flush=True)
-        finally:
-            self.lock.release()
-
-
-def timeit(fn):
-    start = time.time()
-    ret = fn()
+def get_ellapsed(start):
     end = time.time()
     nsec = end - start
     hr = int(nsec // 3600)
     minute = int((nsec % 3600) // 60)
     sec = int(nsec % 60)
-    return ret, f"{hr}:{minute:02}:{sec:02}"
+    return f"{hr}:{minute:02}:{sec:02}"
 
 
 def collect_existing(out_dir):
@@ -39,7 +25,7 @@ def collect_existing(out_dir):
     if os.path.exists(procfn):
         with open(procfn) as f:
             for line in f:
-                name = line.split(',')[0]
+                name = line.split(",")[0]
                 existing.append(name)
     return existing
 
@@ -59,128 +45,179 @@ def collect_remaining(list_fn, out_dir):
         for line in f:
             name = name_from_zst(line)
             if name not in existing:
-                to_proc.append((line.rstrip(), name))
+                to_proc.append(line.rstrip())
     return to_proc
 
 
 def parse_url(url):
     m = re.match(r".*(lichess_db.*pgn\.zst)", url)
     zst = m.group(1)
-    pgn_fn = zst[:-4]
-    return zst, pgn_fn
+    return zst, name_from_zst(zst)
 
 
-class Monitor:
-    def __init__(self, dl_dir, max_active_procs, zst_list):
-        self.dl_dir = dl_dir
+class Manager:
+    def __init__(self, dl_dir, max_cached, urls, parser_pool):
+        self.dl_dir = Path(dl_dir)
+        self.lock = threading.Lock()
         os.makedirs(self.dl_dir, exist_ok=True)
-        self.max_active_procs = max_active_procs
-        self.zst_list = zst_list
+        self.dl_log = self.dl_dir.joinpath("downloaded.txt")
+        self.proc_log = self.dl_dir.joinpath("processed.txt")
+        self.max_cached = max_cached
+        self.parser_pool = parser_pool
+
+        self.processed = set()
+        if self.proc_log.exists():
+            with open(self.proc_log) as f:
+                for line in f:
+                    name = line.split(",")[0]
+                    self.processed.add(name)
+
+        self.to_dl = []
+        self.zst_list = [parse_url(url)[0] for url in urls]
+        existing = self.get_existing_zsts()
+        for url in urls:
+            zst, name = parse_url(url)
+            if name in self.processed:
+                continue
+            if zst in existing:
+                self.parser_pool.enqueue(str(self.dl_dir / zst), name)
+            else:
+                self.to_dl.append(url)
 
     def get_existing_zsts(self):
-        zsts = list(filter(lambda fn: fn in self.zst_list, os.listdir(self.dl_dir)))
-        return zsts
+        with self.lock:
+            existing = []
+            if self.dl_log.exists():
+                with open(self.dl_log) as f:
+                    for line in f:
+                        existing.append(line.rstrip())
+            zsts = list(
+                filter(
+                    lambda fn: fn in self.zst_list and fn in existing,
+                    os.listdir(self.dl_dir),
+                )
+            )
+            return zsts
 
-    def should_sleep(self):
+    def cache_full(self):
         zsts = self.get_existing_zsts()
-        return len(zsts) >= 2 * self.max_active_procs
+        return len(zsts) >= self.max_cached
 
+    def update_downloaded(self, zst):
+        with self.lock:
+            with open(self.dl_log, "a") as f:
+                f.write(f"{zst}\n")
 
-def download_proc(pid, dl_start, url_q, zst_q, print_safe, monitor):
-    line = dl_start + pid
-    while True:
-        url, name = url_q.get()
-        if url == "DONE":
-            zst_q.put(("DONE", None))
-            break
-        zst, _ = parse_url(url)
-        if not os.path.exists(os.path.join(monitor.dl_dir, zst)):
-            while monitor.should_sleep():
-                print_safe(f"\033[{line}H\033[Kdl proc {pid}: sleeping...", end="\r")
-                time.sleep(5)
-            print_safe(f"\033[{line}H\033[Kdl proc {pid}: downloading {name}", end="\r")
-            _, time_str = timeit(
-                lambda: subprocess.call(
+    def update_processed(self, name, ngames):
+        if name in self.processed:
+            return
+
+        with self.lock:
+            self.processed.add(name)
+
+            with open(self.proc_log, "a") as f:
+                f.write(f"{name},{ngames}\n")
+
+            zst = zst_from_name(name)
+            if (self.dl_dir / zst).exists():
+                os.remove(self.dl_dir / zst)
+
+            with open(self.dl_log, "r") as f:
+                lines = f.readlines()
+            with open(self.dl_log, "w") as f:
+                for line in lines:
+                    if line.rstrip() != zst:
+                        f.write(line)
+
+    def download_loop(self, info):
+        active = []
+        npid = 1
+        curpid = 0
+        while not stopping and (self.to_dl or active):
+            if not self.cache_full() and self.to_dl:
+                url = self.to_dl.pop()
+                zst, name = parse_url(url)
+                p = subprocess.Popen(
                     ["wget", "-nv", url],
-                    cwd=monitor.dl_dir,
+                    cwd=self.dl_dir,
                     stdout=devnull,
                     stderr=devnull,
                 )
-            )
-            print_safe(
-                f"\033[{line}H\033[Kdl proc: finished downloading {name} in {time_str}",
-                end="\r",
-            )
-        zst_q.put((name, zst))
+                npid = max(npid, len(active) + 1)
+                curpid %= npid
+                start = time.time()
+                active.append((p, zst, name, start, curpid))
+                if len(info) <= curpid:
+                    info.append((False, "", 0))
+                info[curpid] = (False, self.dl_dir / zst, start)
+                curpid += 1
 
+            for p, zst, name, start, pid in active:
+                if p.poll() is not None:
+                    info[pid] = (True, name, get_ellapsed(start))
+                    self.update_downloaded(zst)
+                    active.remove((p, zst, name, start, pid))
+                    self.parser_pool.enqueue(str(self.dl_dir / zst), name)
+                    curpid = pid
 
-def start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, nproc):
-    procs = []
-    for pid in range(nproc):
-        p = Process(
-            target=download_proc,
-            args=(pid, dl_start, url_q, zst_q, print_safe, monitor),
-        )
-        p.daemon = True
-        p.start()
-        procs.append(p)
-    return procs
+            time.sleep(1)
 
-
-def remove_completed(outdir, dl_dir, parser_pool, total, sleep=5):
-    logfile = os.path.join(outdir, 'processed.txt')
-    processed = set()
-    if os.path.exists(logfile):
-        with open(logfile) as f:
-            for line in f:
-                name = line.split(',')[0]
-                processed.add(name)
-
-    with open(logfile, 'a') as f: 
-        while True:
-            time.sleep(sleep)
-            completed = parser_pool.get_completed()
+    def remove_completed(self, sleep=5):
+        while not stopping:
+            completed = self.parser_pool.get_completed()
             for name, ngames in completed:
-                if name not in processed:
-                    processed.add(name)
-                    f.write(f'{name},{ngames}\n')
-                zst = zst_from_name(name)
-                if os.path.exists(os.path.join(dl_dir, zst)):
-                    os.remove(os.path.join(dl_dir, zst))
-            if len(completed) == total:
-                break
+                self.update_processed(name, ngames)
+            time.sleep(sleep)
 
-def print_loop(pool, print_offset, print_safe, nfiles):
-    print_safe("\033[2J", end="")
-    while len(pool.get_completed()) < nfiles:
-        info = pool.get_info()
-        clear = [f"\033[{i}H\033[K" for i in range(print_offset, print_offset + len(info))]
-        print_safe(''.join(clear), end='')
-        print_safe(f'\033[{print_offset}H' + '\n'.join(info))
+        completed = self.parser_pool.get_completed()
+        for name, ngames in completed:
+            self.update_processed(name, ngames)
+
+
+def get_dl_status(dl_info):
+    for finished, name, ts in dl_info:
+        if finished:
+            yield f"finished downloading {name} in {ts}"
+        else:
+            size = os.path.getsize(name)
+            MBps = size / 1024 / 1024 / (time.time() - ts)
+            yield f"downloading {name_from_zst(name.name)} ({get_ellapsed(ts)}, {MBps:.2f} MB/s)"
+
+
+def print_loop(pool, nfiles, dl_info):
+    print("\033[2J", end="")
+    while len(pool.get_completed()) < nfiles and not stopping:
+        info = list(get_dl_status(dl_info)) + [""] + pool.get_info()
+        clear = [f"\033[{i}H\033[K" for i in range(len(info))]
+        print("".join(clear), end="")
+        print("\033[0H", end="")
+        print("\n".join(info))
         time.sleep(1)
+
+    info = list(get_dl_status(dl_info)) + [""] + pool.get_info()
+    clear = [f"\033[{i}H\033[K" for i in range(len(info))]
+    print("".join(clear), end="")
+    print("\033[0H", end="")
+    print("\n".join(info))
+
+
+stopping = False
 
 
 def main(
     list_fn,
     out_dir,
-    n_dl_proc,
+    max_dl_cache,
     max_active_procs,
     n_reader_proc,
     n_move_proc,
     minSec,
     elo_edges,
 ):
-    to_proc = collect_remaining(list_fn, out_dir)
+    to_proc = collect_remaining(list_fn, Path(out_dir) / "tmp_zst")
     if len(to_proc) == 0:
         print("All files already processed")
         return
-
-    url_q = Queue()
-    zst_q = Queue()
-
-    print_safe = PrintSafe()
-    zst_list = [fn.split("/")[-1] for fn, _ in to_proc]
-    print_offset = 2 + n_dl_proc
 
     pool = ParserPool(
         nSimultaneous=max_active_procs,
@@ -192,68 +229,37 @@ def main(
         elo_edges=elo_edges,
         chunkSize=1024 * 1024,
         printFreq=1,
-        printOffset=2 + n_dl_proc,
         outdir=out_dir,
     )
+    monitor = Manager(Path(out_dir) / "tmp_zst", max_dl_cache, to_proc, pool)
 
-    monitor = Monitor(os.path.join(out_dir, "tmp_zst"), max_active_procs, zst_list)
-
-    rc_thread = threading.Thread(
-        target=remove_completed,
-        args=(out_dir, monitor.dl_dir, pool, len(to_proc)),
-    )
+    rc_thread = threading.Thread(target=monitor.remove_completed)
     rc_thread.start()
 
-    dl_start = 1
-
+    dl_info = []
     print_thread = threading.Thread(
-        target=print_loop,
-        args=(pool, print_offset, print_safe, len(to_proc)),
+        target=print_loop, args=(pool, len(to_proc), dl_info)
     )
     print_thread.start()
 
-    dl_ps = start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, n_dl_proc)
+    dl_thread = threading.Thread(target=monitor.download_loop, args=(dl_info,))
+    dl_thread.start()
 
-    existing_zsts = monitor.get_existing_zsts()
-
-    for url, name in to_proc:
-        zst, _ = parse_url(url)
-        if zst in existing_zsts:
-            zst_q.put((name, zst))
-        else:
-            url_q.put((url, name))
-
-    for _ in range(n_dl_proc):
-        url_q.put(("DONE", None))
-
-    n_dl_done = 0
-
+    global stopping
     try:
-        while True:
-            name, zst_fn = zst_q.get()
-            if name == "DONE":
-                n_dl_done += 1
-                if n_dl_done == n_dl_proc:
-                    break
-            else:
-                pool.enqueue(os.path.join(monitor.dl_dir, zst_fn), name)
-
+        while not stopping:
+            time.sleep(1)
+            completed = pool.get_completed()
+            if len(completed) == len(to_proc):
+                stopping = True
+    except Exception as e:
+        stopping = True
+        print(e)
     finally:
-        print_thread.join()
         rc_thread.join()
+        dl_thread.join()
+        print_thread.join()
         pool.join()
-        print_safe("cleaning up...")
-        url_q.close()
-        zst_q.close()
-        for dl_p in dl_ps:
-            try:
-                dl_p.join(0.25)
-            except Exception as e:
-                print(e)
-                dl_p.kill()
-        for fn in os.listdir(monitor.dl_dir):
-            if re.match(r"lichess_db_standard_rated.*\.zst.*\.tmp", fn):
-                os.remove(fn)
 
 
 if __name__ == "__main__":
@@ -271,10 +277,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--outdir", default=".", help="folder to save parquet files")
     parser.add_argument(
-        "--n_dl_procs",
+        "--max_dl_cache",
         default=2,
         type=int,
-        help="number of zsts to download in parallel",
+        help="max number of zsts to store on disk",
     )
     parser.add_argument(
         "--n_active_procs",
@@ -325,7 +331,7 @@ if __name__ == "__main__":
     main(
         list_fn=args.list,
         out_dir=args.outdir,
-        n_dl_proc=args.n_dl_procs,
+        max_dl_cache=args.max_dl_cache,
         max_active_procs=args.n_active_procs,
         n_reader_proc=args.n_reader_procs,
         n_move_proc=args.n_move_procs,
