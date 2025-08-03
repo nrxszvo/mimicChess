@@ -75,7 +75,7 @@ class Manager:
         self.to_dl = []
         self.zst_list = [parse_url(url)[0] for url in urls]
         existing = self.get_existing_zsts()
-        for url in urls:
+        for url in sorted(urls):
             zst, name = parse_url(url)
             if name in self.processed:
                 continue
@@ -134,7 +134,7 @@ class Manager:
         npid = 1
         curpid = 0
         while not stopping and (self.to_dl or active):
-            if not self.cache_full() and self.to_dl:
+            if not self.cache_full() and len(active) < self.max_cached//2 and self.to_dl:
                 url = self.to_dl.pop()
                 zst, name = parse_url(url)
                 p = subprocess.Popen(
@@ -153,11 +153,15 @@ class Manager:
                 curpid += 1
 
             for p, zst, name, start, pid in active:
-                if p.poll() is not None:
-                    info[pid] = (True, name, get_ellapsed(start))
-                    self.update_downloaded(zst)
+                ret = p.poll()
+                if ret is not None:
                     active.remove((p, zst, name, start, pid))
-                    self.parser_pool.enqueue(str(self.dl_dir / zst), name)
+                    if ret == 0:
+                        info[pid] = (True, name, get_ellapsed(start))
+                        self.update_downloaded(zst)
+                        self.parser_pool.enqueue(str(self.dl_dir / zst), name)
+                    else:
+                        print("wget failed for", name)
                     curpid = pid
 
             time.sleep(1)
@@ -179,9 +183,12 @@ def get_dl_status(dl_info):
         if finished:
             yield f"finished downloading {name} in {ts}"
         else:
-            size = os.path.getsize(name)
-            MBps = size / 1024 / 1024 / (time.time() - ts)
-            yield f"downloading {name_from_zst(name.name)} ({get_ellapsed(ts)}, {MBps:.2f} MB/s)"
+            if name.exists():
+                size = os.path.getsize(name)
+                MBps = size / 1024 / 1024 / (time.time() - ts)
+                yield f"downloading {name_from_zst(name.name)} ({get_ellapsed(ts)}, {MBps:.2f} MB/s)"
+            else:
+                yield f"downloading {name_from_zst(name.name)} ({get_ellapsed(ts)})"
 
 
 def print_loop(pool, nfiles, dl_info):
