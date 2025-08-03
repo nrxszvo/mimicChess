@@ -17,7 +17,7 @@ class PrintSafe:
     def __call__(self, *args, **kwargs):
         self.lock.acquire()
         try:
-            print(*args, **kwargs)
+            print(*args, **kwargs, flush=True)
         finally:
             self.lock.release()
 
@@ -96,9 +96,9 @@ def download_proc(pid, dl_start, url_q, zst_q, print_safe, monitor):
         zst, _ = parse_url(url)
         if not os.path.exists(os.path.join(monitor.dl_dir, zst)):
             while monitor.should_sleep():
-                print_safe(f"\033[{line}H\033[Kdl proc: sleeping...", end="\r")
+                print_safe(f"\033[{line}H\033[Kdl proc {pid}: sleeping...", end="\r")
                 time.sleep(5)
-            print_safe(f"\033[{line}H\033[Kdl proc: downloading {name}", end="\r")
+            print_safe(f"\033[{line}H\033[Kdl proc {pid}: downloading {name}", end="\r")
             _, time_str = timeit(
                 lambda: subprocess.call(
                     ["wget", "-nv", url],
@@ -150,6 +150,15 @@ def remove_completed(outdir, dl_dir, parser_pool, total, sleep=5):
             if len(completed) == total:
                 break
 
+def print_loop(pool, print_offset, print_safe, nfiles):
+    print_safe("\033[2J", end="")
+    while len(pool.get_completed()) < nfiles:
+        info = pool.get_info()
+        clear = [f"\033[{i}H\033[K" for i in range(print_offset, print_offset + len(info))]
+        print_safe(''.join(clear), end='')
+        print_safe(f'\033[{print_offset}H' + '\n'.join(info))
+        time.sleep(1)
+
 
 def main(
     list_fn,
@@ -171,6 +180,7 @@ def main(
 
     print_safe = PrintSafe()
     zst_list = [fn.split("/")[-1] for fn, _ in to_proc]
+    print_offset = 2 + n_dl_proc
 
     pool = ParserPool(
         nSimultaneous=max_active_procs,
@@ -196,7 +206,11 @@ def main(
 
     dl_start = 1
 
-    print("\033[2J", end="")
+    print_thread = threading.Thread(
+        target=print_loop,
+        args=(pool, print_offset, print_safe, len(to_proc)),
+    )
+    print_thread.start()
 
     dl_ps = start_download_procs(dl_start, url_q, zst_q, print_safe, monitor, n_dl_proc)
 
@@ -220,12 +234,14 @@ def main(
             if name == "DONE":
                 n_dl_done += 1
                 if n_dl_done == n_dl_proc:
-                    pool.join()
                     break
             else:
                 pool.enqueue(os.path.join(monitor.dl_dir, zst_fn), name)
 
     finally:
+        print_thread.join()
+        rc_thread.join()
+        pool.join()
         print_safe("cleaning up...")
         url_q.close()
         zst_q.close()
@@ -235,7 +251,6 @@ def main(
             except Exception as e:
                 print(e)
                 dl_p.kill()
-        rc_thread.join()
         for fn in os.listdir(monitor.dl_dir):
             if re.match(r"lichess_db_standard_rated.*\.zst.*\.tmp", fn):
                 os.remove(fn)
@@ -299,7 +314,6 @@ if __name__ == "__main__":
             2600,
             2800,
             3000,
-            4000,
         ],
         type=int,
         nargs="+",
