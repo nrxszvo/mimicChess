@@ -1,9 +1,5 @@
 autopep8
 numpy
-torch
-torchvision
-torchaudio
-torchdata
 lightning
 python-chess
 tokenizers

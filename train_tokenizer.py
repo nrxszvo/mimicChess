@@ -138,7 +138,7 @@ class PgnIterator:
         self.iter = pq.ParquetFile(pqfile).iter_batches(
             batch_size=batch_size, columns=["moves", "clk"]
         )
-        self.pat_str = "O-O-O|O-O|[RNBQK]|[a-h][0-9]|[a-h]|[RNBQKa-h]|[x=+#]|\s"
+        self.pat_str = "O-O-O|O-O|[RNBQK]|[a-h][0-9]|[a-h]|[RNBQKa-h]|[x=+#]|\\s"
 
     def __iter__(self):
         for batch in self.iter:
@@ -200,12 +200,15 @@ class FenIterator:
                 fen = fen.replace("/", "")
                 yield fen.split()[0]
 
+
 class MPFenIterator:
     def __init__(self, pqfile, batch_size, nwriteprocs):
         self.inq = Queue()
         self.outq = Queue()
         self.total = pq.ParquetFile(pqfile).metadata.num_rows
-        self.add_p = Process(target=add_pgns, args=(pqfile, self.inq, batch_size, nwriteprocs))
+        self.add_p = Process(
+            target=add_pgns, args=(pqfile, self.inq, batch_size, nwriteprocs)
+        )
         self.add_p.daemon = True
         self.add_p.start()
 
@@ -225,7 +228,9 @@ class MPFenIterator:
                 self.ndone += 1
                 if self.ndone == len(self.writeprocs):
                     if self.ngames < self.total:
-                        print(f"Warning: only wrote {self.ngames} games out of {self.total}")
+                        print(
+                            f"Warning: only wrote {self.ngames} games out of {self.total}"
+                        )
                     break
             else:
                 self.ngames += len(games)
@@ -307,7 +312,9 @@ def train_bpe(pqfile, fen_file, batch_size, tokenizer_fn="tokenizer.json"):
 def train_fen(pqfile, batch_size, nwriteprocs, tokenizer_fn="fen_tokenizer.json"):
     tokenizer = Tokenizer(BPE())
     trainer = BpeTrainer(vocab_size=100000, show_progress=False)
-    tokenizer.train_from_iterator(MPFenIterator(pqfile, batch_size, nwriteprocs), trainer=trainer)
+    tokenizer.train_from_iterator(
+        MPFenIterator(pqfile, batch_size, nwriteprocs), trainer=trainer
+    )
 
     p = Path(tokenizer_fn)
     ref = p.parent / ("ref_" + p.name)
