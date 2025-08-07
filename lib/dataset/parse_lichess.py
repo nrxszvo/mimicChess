@@ -38,7 +38,7 @@ def main(args):
         minSec=60,
         maxSec=10800,
         maxInc=600,
-        elo_edges=[1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000],
+        elo_edges=[1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000],
         chunkSize=1024 * 1024,
         printFreq=1,
         outdir=args.out_dir,
@@ -61,8 +61,8 @@ def main(args):
     os.makedirs(zstdir, exist_ok=True)
 
     processed = set() 
-    if (tld / "processed.txt").exists():
-        with open(tld / "processed.txt") as f:
+    if (zstdir / "processed.txt").exists():
+        with open(zstdir / "processed.txt") as f:
             for line in f:
                 name = line.split(",")[0]
                 processed.add(name)
@@ -76,7 +76,7 @@ def main(args):
                 pool.enqueue(str(zst), name)
                 processing.add(name)
 
-        with open(tld / "processed.txt", "a") as f:
+        with open(zstdir / "processed.txt", "a") as f:
             for name, ngames in pool.get_completed():
                 if name not in processed:
                     f.write(f"{name},{ngames}\n")
