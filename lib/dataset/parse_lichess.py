@@ -73,9 +73,6 @@ def main(args):
         for zst in sorted(downloaded, reverse=True):
             name = name_from_zst(zst.name)
             if name not in processed and name not in processing:
-                mod_time = os.path.getmtime(zst)
-                if time.time() - mod_time < 60:
-                    continue
                 pool.enqueue(str(zst), name)
                 processing.add(name)
 

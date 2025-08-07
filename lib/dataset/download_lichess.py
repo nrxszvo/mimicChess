@@ -32,14 +32,12 @@ if __name__ == "__main__":
         lines = f.readlines()
 
     urls = [line.rstrip() for line in lines]
-
+    
     for i, url in enumerate(urls):
         zst, name = parse_url(url)
-        print(f'downloading {name} ({i+1} of {len(urls)})')
-        subprocess.call(f'wget {url} -P {tmpdir}', shell=True)
-        src = tmpdir / zst
-        dest = zstdir / zst
-        if dest.exists():
-            os.remove(dest)
-        os.rename(src, dest)
-        
+        if not (zstdir / zst).exists():
+            print(f'downloading {name} ({i+1} of {len(urls)})')
+            subprocess.call(f'wget {url} -P {tmpdir}', shell=True)
+            src = tmpdir / zst
+            dest = zstdir / zst
+            os.rename(src, dest)        
