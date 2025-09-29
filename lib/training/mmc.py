@@ -147,8 +147,7 @@ class MimicChessModule(L.LightningModule):
         return self.model(tokens)
 
     def _get_loss(self, input):
-        breakpoint()
-        pred = self(input[:,:-1])
+        pred = self(input[:,:-1]).transpose(1,2)
         loss = F.cross_entropy(pred, input[:,1:], ignore_index=self.NOOP)
         return loss
 

@@ -52,20 +52,6 @@ def main(args):
     torch.set_float32_matmul_precision("high")
     torch.manual_seed(cfg["random_seed"])
 
-    mmc = MimicChessModule(
-        MMCModuleArgs(
-            name=args.name,
-            model_args=ModelArgs(cfg["model_args"]),
-            lr_scheduler_params=cfg["lr_scheduler_params"],
-            max_steps=cfg["max_steps"],
-            val_check_steps=cfg["val_check_steps"],
-            accumulate_grad_batches=cfg["accumulate_grad_batches"],
-            random_seed=cfg["random_seed"],
-            strategy=cfg["strategy"],
-            devices=1,
-            outdir=save_path,
-        )
-    )
     num_workers = args.num_workers
     if num_workers == -1:
         num_workers = os.cpu_count() - 1
@@ -80,6 +66,21 @@ def main(args):
         encoder_params=encoder_params,
         batch_size=cfg["batch_size"],
         num_workers=num_workers,
+    )
+
+    mmc = MimicChessModule(
+        MMCModuleArgs(
+            name=args.name,
+            model_args=ModelArgs(cfg["model_args"]),
+            lr_scheduler_params=cfg["lr_scheduler_params"],
+            max_steps=cfg["max_steps"],
+            val_check_steps=cfg["val_check_steps"],
+            accumulate_grad_batches=cfg["accumulate_grad_batches"],
+            random_seed=cfg["random_seed"],
+            strategy=cfg["strategy"],
+            devices=1,
+            outdir=save_path,
+        )
     )
 
     nweights, nflpweights = mmc.num_params()
