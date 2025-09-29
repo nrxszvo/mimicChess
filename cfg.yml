@@ -1,24 +1,23 @@
-datadir: datasets/lichess_180_10800_60_122024_v2/split_11_10_20m_tc600
-elo_groups: [1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,4000]
 model_args:
-  dim: 1024 
+  dim: 128
   n_layers: 16
   n_heads: 32
   n_kv_heads: 8
-  vocab_size: 2048
   multiple_of: 256
   ffn_dim_multiplier: 1.5 
   norm_eps: 1.e-5
   rope_theta: 10000
-  max_seq_len: 150
+  max_seq_len: 300
 lr_scheduler_params:
   lr: 3.e-4
   name: "WarmUpCosine"
   min_lr: 3.e-6
   warmup_steps: 25000
-accumulate_grad_batches: 4 
-global_batch_size: 1024
-max_epochs: 1
+min_timectl: 60
+max_rows_per_file: 10000
+accumulate_grad_batches: 1 
+batch_size: 8
+max_steps: 100000
 val_check_steps: 25000
-strategy: ddp 
+strategy: auto 
 random_seed: 0

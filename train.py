@@ -1,15 +1,17 @@
 import argparse
 import os
+import json
 from datetime import datetime
 
 import torch
-from torch.distributed import init_process_group, destroy_process_group
+import yaml
+from lib.training import MimicChessModule, MMCModuleArgs, MMCDataModule, ModelArgs
 
-from lib import init_modules, get_config
-
-parser = argparse.ArgumentParser(
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", default="cfg.yml", help="yaml config file")
+parser.add_argument("--datadir", default="dataset", help="directory containing parquet files")
+parser.add_argument("--token_file", default="pgn_tokens.json", help="json token file")
+parser.add_argument("--num_workers", default=-1, type=int, help="number of workers")
 parser.add_argument(
     "--save_path",
     default="outputs",
@@ -30,40 +32,63 @@ parser.add_argument(
     default=None,
     help="current commit associated with this version of codebase",
 )
-parser.add_argument('--num_nodes', help='num nodes', default=1, type=int)
 
-
-def ddp_init():
-    torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
-    init_process_group(backend='nccl')
-
+def get_vocab_size(encoder_params):
+    max_tok = 0
+    for tok in encoder_params["ranks"].values():
+        max_tok = max(max_tok, tok)
+    for tok in encoder_params["special_tokens"].values():
+        max_tok = max(max_tok, tok)
+    return max_tok + 1
 
 def main(args):
-    cfgyml = get_config(args.cfg)
-    cfgyml.commit = args.commit
+    with open(args.cfg) as f:
+        cfg = yaml.load(f, Loader=yaml.CLoader)
+    cfg["commit"] = args.commit
 
     save_path = os.path.join(args.save_path, args.name)
     os.makedirs(save_path, exist_ok=True)
 
-    devices = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
-
     torch.set_float32_matmul_precision("high")
-    torch.manual_seed(cfgyml.random_seed)
+    torch.manual_seed(cfg["random_seed"])
 
-    mmc, dm = init_modules(
-        cfgyml,
-        args.name,
-        cfgyml.strategy,
-        devices,
-        num_nodes=args.num_nodes,
-        outdir=os.path.join(save_path, "ckpt"),
+    mmc = MimicChessModule(
+        MMCModuleArgs(
+            name=args.name,
+            model_args=ModelArgs(cfg["model_args"]),
+            lr_scheduler_params=cfg["lr_scheduler_params"],
+            max_steps=cfg["max_steps"],
+            val_check_steps=cfg["val_check_steps"],
+            accumulate_grad_batches=cfg["accumulate_grad_batches"],
+            random_seed=cfg["random_seed"],
+            strategy=cfg["strategy"],
+            devices=1,
+            outdir=save_path,
+        )
+    )
+    num_workers = args.num_workers
+    if num_workers == -1:
+        num_workers = os.cpu_count() - 1
+    with open(args.token_file) as f:
+        encoder_params = json.load(f)
+
+    cfg['model_args']['vocab_size'] = get_vocab_size(encoder_params)
+    dm = MMCDataModule(
+        root_dir=args.datadir,
+        min_timectl=cfg["min_timectl"],
+        max_rows_per_file=cfg["max_rows_per_file"],
+        encoder_params=encoder_params,
+        batch_size=cfg["batch_size"],
+        num_workers=num_workers,
     )
 
-    cfgyml.save(os.path.join(save_path, args.cfg))
     nweights, nflpweights = mmc.num_params()
     est_tflops = (
-        6 * nflpweights * cfgyml.global_batch_size *
-        cfgyml.model_args.max_seq_len / 1e12
+        6
+        * nflpweights
+        * cfg["batch_size"]
+        * cfg["model_args"]["max_seq_len"]
+        / 1e12
     )
     print(f"# model params: {nweights:.2e}")
     print(f"estimated TFLOPs: {est_tflops:.1f}")
@@ -73,12 +98,4 @@ def main(args):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    if args.num_nodes > 1:
-        torch.multiprocessing.set_sharing_strategy('file_system')
-        ddp_init()
-        try:
-            main(args)
-        finally:
-            destroy_process_group()
-    else:
-        main(args)
+    main(args)
