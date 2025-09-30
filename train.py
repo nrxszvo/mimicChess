@@ -5,6 +5,7 @@ from datetime import datetime
 
 import torch
 import yaml
+import subprocess
 from lib.training import MimicChessModule, MMCModuleArgs, MMCDataModule, ModelArgs
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
