@@ -62,7 +62,8 @@ def main(args):
     dm = MMCDataModule(
         root_dir=args.datadir,
         min_timectl=cfg["min_timectl"],
-        max_rows_per_file=cfg["max_rows_per_file"],
+        max_training_rows_per_file=cfg["max_training_rows_per_file"],
+        max_validation_rows_per_file=cfg["max_validation_rows_per_file"],
         encoder_params=encoder_params,
         batch_size=cfg["batch_size"],
         num_workers=num_workers,

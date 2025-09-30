@@ -1,5 +1,5 @@
 model_args:
-  dim: 128
+  dim: 1024
   n_layers: 16
   n_heads: 32
   n_kv_heads: 8
@@ -7,14 +7,15 @@ model_args:
   ffn_dim_multiplier: 1.5 
   norm_eps: 1.e-5
   rope_theta: 10000
-  max_seq_len: 300
+  max_seq_len: 512
 lr_scheduler_params:
   lr: 3.e-4
   name: "WarmUpCosine"
   min_lr: 3.e-6
   warmup_steps: 25000
-min_timectl: 60
-max_rows_per_file: 10000
+min_timectl: 300
+max_validation_rows_per_file: 1000
+max_training_rows_per_file: 10000
 accumulate_grad_batches: 1 
 batch_size: 8
 max_steps: 100000

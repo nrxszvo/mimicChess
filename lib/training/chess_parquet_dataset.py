@@ -114,7 +114,7 @@ class ChessParquetDataset(Dataset):
                     1 for v in tc.to_pylist() if v is not None and v >= self.min_timectl
                 )
             self.file_counts[p] = n
-
+        
         # Per-epoch selected, materialized (reduced) tables per file
         self._epoch_tables: Dict[Path, pa.Table] = {}
         self._cumulative: List[Tuple[Path, int]] = []  # (file, length_of_table)
@@ -280,7 +280,8 @@ class MMCDataModule(L.LightningDataModule):
         self,
         root_dir,
         min_timectl,
-        max_rows_per_file,
+        max_training_rows_per_file,
+        max_validation_rows_per_file,
         encoder_params,
         batch_size,
         num_workers,
@@ -288,7 +289,8 @@ class MMCDataModule(L.LightningDataModule):
         super().__init__()
         self.root_dir = root_dir
         self.min_timectl = min_timectl
-        self.max_rows_per_file = max_rows_per_file
+        self.max_training_rows_per_file = max_training_rows_per_file
+        self.max_validation_rows_per_file = max_validation_rows_per_file
         self.encoder_params = encoder_params
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -300,20 +302,20 @@ class MMCDataModule(L.LightningDataModule):
             self.trainset = ChessParquetDataset(
                 self.root_dir,
                 self.min_timectl,
-                self.max_rows_per_file,
+                self.max_training_rows_per_file,
                 self.encoder_params,
             )
             self.valset = ChessParquetDataset(
                 self.root_dir,
                 self.min_timectl,
-                self.max_rows_per_file,
+                self.max_validation_rows_per_file,
                 self.encoder_params,
             )
         if stage == "validate":
             self.valset = ChessParquetDataset(
                 self.root_dir,
                 self.min_timectl,
-                self.max_rows_per_file,
+                self.max_validation_rows_per_file,
                 self.encoder_params,
             )
 
