@@ -9,7 +9,9 @@ from lib.training import MimicChessModule, MMCModuleArgs, MMCDataModule, ModelAr
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", default="cfg.yml", help="yaml config file")
-parser.add_argument("--datadir", default="dataset", help="directory containing parquet files")
+parser.add_argument(
+    "--datadir", default="dataset", help="directory containing parquet files"
+)
 parser.add_argument("--token_file", default="pgn_tokens.json", help="json token file")
 parser.add_argument("--num_workers", default=-1, type=int, help="number of workers")
 parser.add_argument(
@@ -33,6 +35,7 @@ parser.add_argument(
     help="current commit associated with this version of codebase",
 )
 
+
 def get_vocab_size(encoder_params):
     max_tok = 0
     for tok in encoder_params["ranks"].values():
@@ -41,26 +44,27 @@ def get_vocab_size(encoder_params):
         max_tok = max(max_tok, tok)
     return max_tok + 1
 
-def main(args):
-    with open(args.cfg) as f:
-        cfg = yaml.load(f, Loader=yaml.CLoader)
-    cfg["commit"] = args.commit
 
-    save_path = os.path.join(args.save_path, args.name)
+def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
+    with open(cfg) as f:
+        cfg = yaml.load(f, Loader=yaml.CLoader)
+    cfg["commit"] = commit
+
+    save_path = os.path.join(save_path, name)
     os.makedirs(save_path, exist_ok=True)
 
     torch.set_float32_matmul_precision("high")
     torch.manual_seed(cfg["random_seed"])
 
-    num_workers = args.num_workers
+    num_workers = num_workers
     if num_workers == -1:
         num_workers = os.cpu_count() - 1
-    with open(args.token_file) as f:
+    with open(token_file) as f:
         encoder_params = json.load(f)
 
-    cfg['model_args']['vocab_size'] = get_vocab_size(encoder_params)
+    cfg["model_args"]["vocab_size"] = get_vocab_size(encoder_params)
     dm = MMCDataModule(
-        root_dir=args.datadir,
+        root_dir=datadir,
         min_timectl=cfg["min_timectl"],
         max_training_rows_per_file=cfg["max_training_rows_per_file"],
         max_validation_rows_per_file=cfg["max_validation_rows_per_file"],
@@ -71,7 +75,7 @@ def main(args):
 
     mmc = MimicChessModule(
         MMCModuleArgs(
-            name=args.name,
+            name=name,
             model_args=ModelArgs(cfg["model_args"]),
             lr_scheduler_params=cfg["lr_scheduler_params"],
             max_steps=cfg["max_steps"],
@@ -86,18 +90,27 @@ def main(args):
 
     nweights, nflpweights = mmc.num_params()
     est_tflops = (
-        6
-        * nflpweights
-        * cfg["batch_size"]
-        * cfg["model_args"]["max_seq_len"]
-        / 1e12
+        6 * nflpweights * cfg["batch_size"] * cfg["model_args"]["max_seq_len"] / 1e12
     )
     print(f"# model params: {nweights:.2e}")
     print(f"estimated TFLOPs: {est_tflops:.1f}")
 
-    mmc.fit(dm, ckpt=args.ckpt)
+    mmc.fit(dm, ckpt=ckpt)
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    main(args)
+    commit = args.commit
+    if commit is None:
+        cmd = "git rev-parse HEAD"
+        commit = subprocess.check_output(cmd, shell=True).decode("utf-8").strip()
+    main(
+        args.cfg,
+        args.datadir,
+        args.token_file,
+        args.num_workers,
+        args.save_path,
+        args.name,
+        args.ckpt,
+        commit,
+    )
