@@ -10,19 +10,10 @@ import argparse
 import random
 from pathlib import Path
 from typing import List, Optional
-import logging
 
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
-
-
-def setup_logging():
-    """Setup logging configuration."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
 
 
 def discover_storage_files(root_dir: Path) -> List[Path]:
@@ -52,7 +43,7 @@ def discover_storage_files(root_dir: Path) -> List[Path]:
     if not storage_files:
         raise FileNotFoundError(f"No data.parquet files found under {root_dir}")
     
-    logging.info(f"Found {len(storage_files)} storage files")
+    print(f"Found {len(storage_files)} storage files")
     return storage_files
 
 
@@ -84,11 +75,11 @@ def count_filtered_rows(file_path: Path, min_timectl: int) -> int:
         
         return count
     except Exception as e:
-        logging.error(f"Error counting rows in {file_path}: {e}")
+        print(f"Error counting rows in {file_path}: {e}")
         return 0
 
 
-def find_max_filtered_rows(storage_files: List[Path], min_timectl: int, min_rows: int) -> int:
+def find_max_filtered_rows(storage_files: List[Path], min_timectl: int, min_rows: int, max_repeats: int) -> int:
     """
     Find the maximum number of filtered rows across all storage files.
     
@@ -102,25 +93,28 @@ def find_max_filtered_rows(storage_files: List[Path], min_timectl: int, min_rows
     max_rows = 0
     file_counts = {}
     
-    logging.info("Counting filtered rows in each storage file...")
+    print("Counting filtered rows in each storage file...")
     
     for file_path in storage_files:
         count = count_filtered_rows(file_path, min_timectl)
         if count < min_rows:
-            logging.warning(f"Not enough filtered rows in {file_path}: {count} < {min_rows}")
+            print(f"WARNING: Not enough filtered rows in {file_path}: {count} < {min_rows}")
         else:
-            file_counts[file_path] = count
+            file_counts[file_path] = count 
             max_rows = max(max_rows, count)
-            logging.info(f"{file_path}: {count} filtered rows")
+            print(f"{file_path}: {count} filtered rows")
+
+    for fp in file_counts:
+        file_counts[fp] = min(max_rows, max_repeats*file_counts[fp])
         
-    logging.info(f"Maximum filtered rows in any file: {max_rows}")
+    print(f"Maximum filtered rows in any file: {max_rows}")
     return max_rows, file_counts
 
 
 class FilteredRowIterator:
     """Memory-efficient iterator that streams filtered rows from a parquet file, cycling when exhausted."""
     
-    def __init__(self, file_path: Path, min_timectl: int, min_rows: int, batch_size: int = 1000):
+    def __init__(self, file_path: Path, min_timectl: int, max_rows: int, batch_size: int = 1000):
         self.file_path = file_path
         self.min_timectl = min_timectl
         self.filter_expr = ds.field("timeCtl") >= pa.scalar(min_timectl, pa.int16())
@@ -129,11 +123,16 @@ class FilteredRowIterator:
         self.current_batch_index = 0
         self.global_index = 0
         self.total_filtered_rows = 0
+        self.max_rows = max_rows
+        self.total_rows = 0
         self.dataset = ds.dataset(str(self.file_path), format="parquet")
-        self._count_total_rows(min_rows)
+        # create schema that is subset of dataset schema
+        self._columns = ["moves", "clk", "result", "welo", "belo", "timeCtl", "increment"]
+        self._schema = pa.schema({field.name: field.type for field in self.dataset.schema if field.name in self._columns})
+        self._count_total_rows()
         self._load_next_batch()
     
-    def _count_total_rows(self, min_rows: int):
+    def _count_total_rows(self):
         """Count total filtered rows for cycling logic."""
         try:
             self.total_filtered_rows = self.dataset.count_rows(filter=self.filter_expr)
@@ -141,34 +140,36 @@ class FilteredRowIterator:
             # Fallback counting method
             scanner = self.dataset.scanner(filter=self.filter_expr, columns=["timeCtl"])
             self.total_filtered_rows = len(scanner.to_table())
-        if self.total_filtered_rows < min_rows:
-            raise ValueError(f"Not enough filtered rows in {self.file_path}: {self.total_filtered_rows} < {min_rows}")
 
-        logging.info(f"Found {self.total_filtered_rows} filtered rows in {self.file_path}")
+        print(f"Found {self.total_filtered_rows} filtered rows in {self.file_path}")
     
     def _load_next_batch(self):
         """Load the next batch of filtered rows."""
-        if self.total_filtered_rows == 0:
+        if self.total_filtered_rows == 0 or self.total_rows >= self.max_rows:
             self.current_batch = None
             return
-        
+
         # Calculate which batch to load based on global index
         batch_start = (self.global_index // self.batch_size) * self.batch_size
-        
+
         # Create scanner with filter and limit
         scanner = self.dataset.scanner(
             filter=self.filter_expr,
+            columns=self._columns,
             #batch_size=self.batch_size,
             #offset=batch_start % self.total_filtered_rows
         )
         # create empty batch with number of arrays equal to schema
-        arrays = [pa.array([], type=field.type) for field in self.dataset.schema]
-        self.current_batch = pa.Table.from_arrays(arrays, schema=self.dataset.schema)
+        arrays = [pa.array([], type=field.type) for field in self._schema]
+        self.current_batch = pa.Table.from_arrays(arrays, schema=self._schema)
         while len(self.current_batch) < self.batch_size:
             indices = pa.array(range(batch_start, min(batch_start + self.batch_size, self.total_filtered_rows)))
             # concatenate batch
             self.current_batch = pa.concat_tables([self.current_batch, scanner.take(indices)])
             batch_start = (batch_start + len(indices)) % self.total_filtered_rows
+            self.total_rows += len(indices)
+            if self.total_rows >= self.max_rows:
+                break
             
         self.current_batch_index = 0
     
@@ -239,9 +240,9 @@ class ProgressiveParquetWriter:
         
         if self.writer is not None:
             self.writer.close()
-            logging.info(f"Wrote {self.total_rows} rows to {self.output_path}")
+            print(f"Wrote {self.total_rows} rows to {self.output_path}")
         else:
-            logging.warning(f"No data to write for {self.output_path}")
+            print(f"WARNING: No data to write for {self.output_path}")
 
 
 def create_dataset_splits(
@@ -249,7 +250,7 @@ def create_dataset_splits(
     output_dir: Path,
     min_timectl: int,
     min_rows_per_file: int,
-    max_rows_per_file: int,
+    file_counts: dict[Path, int],
     val_percentage: float,
     test_percentage: float,
     batch_size: int = 1000
@@ -261,32 +262,29 @@ def create_dataset_splits(
         storage_files: List of storage file paths
         output_dir: Directory to save the new parquet files
         min_timectl: Minimum timeCtl value for filtering
-        max_rows_per_file: Maximum rows per file (from max analysis)
+        file_counts: Dictionary of file paths to maximum rows per file (from max analysis)
         val_percentage: Percentage of rows for validation set
         test_percentage: Percentage of rows for test set
         batch_size: Number of rows to batch before writing to disk
     """
     # Calculate total rows and split sizes
-    total_rows = max_rows_per_file * len(storage_files)
+    total_rows = sum(file_counts.values())
     val_rows = int(total_rows * val_percentage / 100)
     test_rows = int(total_rows * test_percentage / 100)
     train_rows = total_rows - val_rows - test_rows
     
-    logging.info(f"Creating dataset with {total_rows} total rows:")
-    logging.info(f"  Train: {train_rows} rows ({100 - val_percentage - test_percentage:.1f}%)")
-    logging.info(f"  Val: {val_rows} rows ({val_percentage:.1f}%)")
-    logging.info(f"  Test: {test_rows} rows ({test_percentage:.1f}%)")
+    print(f"Creating dataset with {total_rows} total rows:")
+    print(f"  Train: {train_rows} rows ({100 - val_percentage - test_percentage:.1f}%)")
+    print(f"  Val: {val_rows} rows ({val_percentage:.1f}%)")
+    print(f"  Test: {test_rows} rows ({test_percentage:.1f}%)")
     
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize memory-efficient iterators for each storage file and handle ValueError
     iterators = []
-    for file_path in storage_files:
-        try:
-            iterators.append(FilteredRowIterator(file_path, min_timectl, min_rows_per_file, batch_size))
-        except ValueError as e:
-            logging.warning(str(e))
+    for file_path, count in file_counts.items():
+        iterators.append(FilteredRowIterator(file_path, min_timectl, count, batch_size))
     
     # Initialize progressive writers for each split
     train_writer = ProgressiveParquetWriter(output_dir / "train.parquet", batch_size)
@@ -301,8 +299,7 @@ def create_dataset_splits(
     train_count = 0
     val_count = 0
     test_count = 0
-    
-    logging.info("Starting memory-efficient round-robin sampling...")
+    print("Starting memory-efficient round-robin sampling...")
     
     try:
         # Round-robin sampling
@@ -363,9 +360,9 @@ def create_dataset_splits(
                 rows_added += 1
                 
                 if rows_added % 10000 == 0:
-                    logging.info(f"Processed {rows_added}/{total_rows} rows")
+                    print(f"Processed {rows_added}/{total_rows} ({rows_added/total_rows*100:.2f}%) rows", end="\r")
         
-        logging.info(f"Final counts - Train: {train_count}, Val: {val_count}, Test: {test_count}")
+        print(f"Final counts - Train: {train_count}, Val: {val_count}, Test: {test_count}")
         
     finally:
         # Ensure all writers are properly finalized
@@ -401,6 +398,12 @@ def main():
         type=int,
         required=True,
         help="Minimum number of rows per file"
+    )
+    parser.add_argument(
+        '--max-repeats',
+        type=int,
+        required=True,
+        help="Maximum number of times a row can be repeated"
     )
     parser.add_argument(
         "--valp",
@@ -440,9 +443,6 @@ def main():
     # Set random seed
     random.seed(args.seed)
     
-    # Setup logging
-    setup_logging()
-    
     # Convert paths
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
@@ -450,23 +450,23 @@ def main():
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
     
-    logging.info(f"Input directory: {input_dir}")
-    logging.info(f"Output directory: {output_dir}")
-    logging.info(f"Min timeCtl: {args.min_timectl}")
-    logging.info(f"Val percentage: {args.valp}%")
-    logging.info(f"Test percentage: {args.testp}%")
-    logging.info(f"Random seed: {args.seed}")
+    print(f"Input directory: {input_dir}")
+    print(f"Output directory: {output_dir}")
+    print(f"Min timeCtl: {args.min_timectl}")
+    print(f"Val percentage: {args.valp}%")
+    print(f"Test percentage: {args.testp}%")
+    print(f"Random seed: {args.seed}")
     
     try:
         # Discover storage files
         storage_files = discover_storage_files(input_dir)
         
         # Find maximum filtered rows across all files
-        max_rows, file_counts = find_max_filtered_rows(storage_files, args.min_timectl, args.min_rows)
+        max_rows, file_counts = find_max_filtered_rows(storage_files, args.min_timectl, args.min_rows, args.max_repeats)
         storage_files = list(file_counts.keys())
         
         if max_rows == 0:
-            logging.error("No rows meet the filter criteria in any file")
+            print("No rows meet the filter criteria in any file")
             return 1
         
         # Create the dataset splits
@@ -475,17 +475,17 @@ def main():
             output_dir,
             args.min_timectl,
             args.min_rows,
-            max_rows,
+            file_counts,
             args.valp,
             args.testp,
             args.batch_size
         )
         
-        logging.info("Dataset creation completed successfully!")
+        print("Dataset creation completed successfully!")
         return 0
         
     except Exception as e:
-        logging.error(f"Error creating dataset: {e}")
+        print(f"Error creating dataset: {e}")
         return 1
 
 
