@@ -67,8 +67,7 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
     dm = MMCDataModule(
         root_dir=datadir,
         min_timectl=cfg["min_timectl"],
-        max_training_rows_per_file=cfg["max_training_rows_per_file"],
-        max_validation_rows_per_file=cfg["max_validation_rows_per_file"],
+        max_repeats=cfg["max_repeats"],
         encoder_params=encoder_params,
         batch_size=cfg["batch_size"],
         num_workers=num_workers,
