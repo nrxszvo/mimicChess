@@ -306,7 +306,7 @@ def main():
                             parquet_files.append(parquet_file)
                 
                 if parquet_files:
-                    if numeric_value == args.min_threshold and not has_plus:
+                    if numeric_value <= args.min_threshold and not has_plus:
                         # This is the threshold second-level directory
                         threshold_second_level_files[second_level_name] = parquet_files
                     elif numeric_value >= args.min_threshold:
