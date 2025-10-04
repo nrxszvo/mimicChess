@@ -209,7 +209,7 @@ def main():
     above_threshold_first_level = []
     
     for first_level_path, first_level_value, first_level_plus in directories:
-        if first_level_value == args.min_threshold and not first_level_plus:
+        if first_level_value <= args.min_threshold and not first_level_plus:
             threshold_first_level.append((first_level_path, first_level_value, first_level_plus))
         elif first_level_value >= args.min_threshold:
             above_threshold_first_level.append((first_level_path, first_level_value, first_level_plus))

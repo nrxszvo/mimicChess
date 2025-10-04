@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 from typing import Tuple, Optional
 from functools import partial
+import re
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -19,7 +20,27 @@ def init_worker(seed):
     np.random.seed(seed)
 
 
-def discover_storage_files(root_dir: Path) -> list[Path]:
+def parse_directory_name(dir_name: str) -> Tuple[int, bool]:
+    """
+    Parse directory name to extract numeric value and plus suffix.
+
+    Args:
+        dir_name: Directory name (e.g., "1000", "2500+")
+
+    Returns:
+        Tuple of (numeric_value, has_plus_suffix)
+    """
+    match = re.match(r"^(\d+)(\+?)$", dir_name)
+    if not match:
+        raise ValueError(f"Invalid directory name format: {dir_name}")
+
+    numeric_value = int(match.group(1))
+    has_plus = bool(match.group(2))
+
+    return numeric_value, has_plus
+
+
+def discover_storage_files(root_dir: Path, max_elo_group: int) -> list[Path]:
     """
     Discover all parquet files in the two-level directory structure.
 
@@ -34,11 +55,16 @@ def discover_storage_files(root_dir: Path) -> list[Path]:
     for first_level in sorted(root_dir.iterdir()):
         if not first_level.is_dir():
             continue
+        numeric_val, _ = parse_directory_name(first_level.name)
+        if numeric_val > max_elo_group:
+            continue
 
         for second_level in sorted(first_level.iterdir()):
             if not second_level.is_dir():
                 continue
-
+            numeric_val, _ = parse_directory_name(second_level.name)
+            if numeric_val > max_elo_group:
+                continue
             parquet_file = second_level / "data.parquet"
             if parquet_file.exists():
                 storage_files.append(parquet_file)
@@ -97,13 +123,10 @@ def get_file_counts_with_repeats(
     max_rows = 0
     file_counts = {}
 
-    print("Counting filtered rows in each storage file...")
-
     for file_path in storage_files:
         count = count_filtered_rows(file_path, min_timectl)
         file_counts[file_path] = count
         max_rows = max(max_rows, count)
-        print(f"{file_path}: {count} filtered rows")
 
     for fp in file_counts:
         file_counts[fp] = min(max_rows, max_repeats * file_counts[fp])
@@ -116,14 +139,23 @@ class FilteredRowIterator:
     """Memory-efficient iterator that streams filtered rows from a parquet file, cycling when exhausted."""
 
     def __init__(
-        self, file_path: Path, min_timectl: int, max_rows: int, batch_size: int = 1000
+        self,
+        file_path: Path,
+        min_timectl: int,
+        max_repeats: int,
+        batch_size: int = 1000,
+        valp: float = 0.05,
+        testp: float = 0.05,
     ):
         self.file_path = file_path
         self.min_timectl = min_timectl
+        self.trainp = 1 - valp - testp
+        self.valp = valp
+        self.testp = testp
         self.filter_expr = ds.field("timeCtl") >= pa.scalar(min_timectl, pa.int16())
         self.batch_size = batch_size
         self.total_filtered_rows = 0
-        self.max_rows = max_rows
+        self.max_repeats = max_repeats
         self.dataset = ds.dataset(str(self.file_path), format="parquet")
         # create schema that is subset of dataset schema
         self.columns = [
@@ -142,55 +174,51 @@ class FilteredRowIterator:
                 if field.name in self.columns
             }
         )
-        self.refresh_epoch()
+        # Create scanner with filter and limit
+        self.scanner = self.dataset.scanner(
+            filter=self.filter_expr,
+            columns=self.columns,
+        )
         self._count_total_rows()
-        self._load_next_batch()
+
+        self.max_rows = self.max_repeats * self.total_filtered_rows
+        self.refresh_epoch()
 
     def refresh_epoch(self):
         self.current_batch = None
         self.current_batch_index = 0
-        self.global_index = 0
-        self._total_rows_out = 0
+        self.batch_start = 0
+        self.total_rows_out = 0
 
     def _count_total_rows(self):
         """Count total filtered rows for cycling logic."""
         self.total_filtered_rows = self.dataset.count_rows(filter=self.filter_expr)
-        print(f"Found {self.total_filtered_rows} filtered rows in {self.file_path}")
 
     def _load_next_batch(self):
         """Load the next batch of filtered rows."""
-        if self.total_filtered_rows == 0 or self._total_rows_out >= self.max_rows:
+        if self.total_filtered_rows == 0 or self.total_rows_out >= self.max_rows:
             self.current_batch = None
             return
 
-        # Calculate which batch to load based on global index
-        batch_start = (self.global_index // self.batch_size) * self.batch_size
-
-        # Create scanner with filter and limit
-        scanner = self.dataset.scanner(
-            filter=self.filter_expr,
-            columns=self.columns,
+        indices = pa.array(
+            range(
+                self.batch_start,
+                min(self.batch_start + self.batch_size, self.total_filtered_rows),
+            )
         )
-        # create empty batch with number of arrays equal to schema
-        arrays = [pa.array([], type=field.type) for field in self.schema]
-        self.current_batch = pa.Table.from_arrays(arrays, schema=self.schema)
-        while len(self.current_batch) < self.batch_size:
-            indices = pa.array(
-                range(
-                    batch_start,
-                    min(batch_start + self.batch_size, self.total_filtered_rows),
-                )
+        if len(indices) < self.batch_size:
+            # concatenate remaining indices from start_index
+            rest = self.batch_size - len(indices)
+            indices = pa.concat_arrays(
+                [indices, pa.array(range(rest))]
             )
-            # concatenate batch
-            self.current_batch = pa.concat_tables(
-                [self.current_batch, scanner.take(indices)]
-            )
-            batch_start = (batch_start + len(indices)) % self.total_filtered_rows
-            self._total_rows_out += len(indices)
-            if self._total_rows_out >= self.max_rows:
-                break
+            self.batch_start = rest
+        else:
+            self.batch_start += self.batch_size
 
+        self.current_batch = self.scanner.take(indices)
         self.current_batch_index = 0
+        self.total_rows_out += len(indices)
 
     def get_next_row(self) -> Optional[pa.Table]:
         """Get the next filtered row, cycling back to start if needed."""
@@ -211,7 +239,6 @@ class FilteredRowIterator:
 
         # Advance indices
         self.current_batch_index += 1
-        self.global_index = (self.global_index + 1) % self.total_filtered_rows
 
         return row
 
@@ -244,17 +271,18 @@ class ChessParquetDataset(Dataset):
     def __init__(
         self,
         root_dir: str | os.PathLike,
+        max_elo_group: int,
         min_timectl: int,
         max_repeats: int,
-        encoder_params,
+        encoder_params: dict,
         columns: Optional[list[str]] = None,
         iterator_batch_size: int = 1000,
-        mode: str = None,
         valp: float = 0.05,
         testp: float = 0.05,
     ) -> None:
         super().__init__()
         self.root_dir = Path(root_dir)
+        self.max_elo_group = max_elo_group
         self.min_timectl = int(min_timectl)
         self.max_repeats = int(max_repeats)
         ranks = {}
@@ -284,7 +312,9 @@ class ChessParquetDataset(Dataset):
             ]
         )
 
-        self.files: list[Path] = discover_storage_files(self.root_dir)
+        self.files: list[Path] = discover_storage_files(
+            self.root_dir, self.max_elo_group
+        )
         self.file_counts = get_file_counts_with_repeats(
             self.files, self.min_timectl, self.max_repeats
         )
@@ -294,35 +324,25 @@ class ChessParquetDataset(Dataset):
             self._prefix.append((p, total, n))
             total += n
 
-        if mode == "train":
-            self._offset = 0
-            self._length = int(total * (1 - valp - testp))
-        elif mode == "val":
-            self._offset = int(total * (1 - valp - testp))
-            self._length = int(total * valp)
-        elif mode == "test":
-            self._offset = int(total * (1 - testp))
-            self._length = int(total * testp)
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-
+        self._total = total
+        self._valp = valp
+        self._testp = testp
+        self._trainp = 1 - valp - testp
         self.iterators = []
         for file_path, count in self.file_counts.items():
             self.iterators.append(
-                FilteredRowIterator(file_path, min_timectl, count, iterator_batch_size)
+                FilteredRowIterator(file_path, min_timectl, max_repeats, iterator_batch_size)
             )
-
-        self.refresh_epoch()
 
     def refresh_epoch(self, seed: Optional[int] = None) -> None:
         for iterator in self.iterators:
             iterator.refresh_epoch()
 
     def __len__(self) -> int:
-        return self._length
+        return self._total
 
     def _locate(self, idx: int) -> Tuple[Path, int]:
-        if idx < 0 or idx >= self._offset + self._length:
+        if idx < 0 or idx >= self._total:
             raise IndexError(idx)
         # binary search over prefix
         lo, hi = 0, len(self._prefix) - 1
@@ -335,7 +355,7 @@ class ChessParquetDataset(Dataset):
                 lo = mid + 1
             else:
                 return mid
-                #return p, idx - start
+                # return p, idx - start
         # Should not happen
         raise RuntimeError("Index mapping failed")
 
@@ -375,15 +395,14 @@ class ChessParquetDataset(Dataset):
             return "<|ELO2400|>"
         elif val <= 2600:
             return "<|ELO2600|>"
-        elif val <= 2800:
-            return "<|ELO2800|>"
-        elif val <= 3000:
-            return "<|ELO3000|>"
+        #elif val <= 2800:
+        #    return "<|ELO2800|>"
+        #elif val <= 3000:
+        #    return "<|ELO3000|>"
         else:
             return "<|ELOMAX|>"
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-        idx += self._offset
         local_idx = self._locate(idx)
         start_idx = local_idx
         while True:
@@ -442,6 +461,7 @@ class MMCDataModule(L.LightningDataModule):
     def __init__(
         self,
         root_dir,
+        max_elo_group,
         min_timectl,
         max_repeats,
         encoder_params,
@@ -449,7 +469,8 @@ class MMCDataModule(L.LightningDataModule):
         num_workers,
     ):
         super().__init__()
-        self.root_dir = root_dir
+        self.root_dir = Path(root_dir)
+        self.max_elo_group = max_elo_group
         self.min_timectl = min_timectl
         self.max_repeats = max_repeats
         self.encoder_params = encoder_params
@@ -460,26 +481,26 @@ class MMCDataModule(L.LightningDataModule):
     def setup(self, stage):
         if stage == "fit":
             self.trainset = ChessParquetDataset(
-                self.root_dir,
+                self.root_dir / "train",
+                self.max_elo_group,
                 self.min_timectl,
                 self.max_repeats,
                 self.encoder_params,
-                mode='train',
             )
             self.valset = ChessParquetDataset(
-                self.root_dir,
+                self.root_dir / "val",
+                self.max_elo_group,
                 self.min_timectl,
-                self.max_repeats,
+                1,
                 self.encoder_params,
-                mode='val',
             )
         if stage == "validate":
             self.valset = ChessParquetDataset(
-                self.root_dir,
+                self.root_dir / "val",
+                self.max_elo_group,
                 self.min_timectl,
-                self.max_repeats,
+                1,
                 self.encoder_params,
-                mode='val',
             )
 
     def train_dataloader(self):
