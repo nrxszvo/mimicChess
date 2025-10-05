@@ -3,7 +3,7 @@ import random
 from pathlib import Path
 from typing import Tuple, Optional
 from functools import partial
-import re
+import regex as re
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -274,17 +274,21 @@ class ChessParquetDataset(Dataset):
         max_elo_group: int,
         min_timectl: int,
         max_repeats: int,
+        max_seq_len: int,
         encoder_params: dict,
         columns: Optional[list[str]] = None,
         iterator_batch_size: int = 1000,
         valp: float = 0.05,
         testp: float = 0.05,
+        max_rows: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.root_dir = Path(root_dir)
         self.max_elo_group = max_elo_group
         self.min_timectl = int(min_timectl)
         self.max_repeats = int(max_repeats)
+        self.max_seq_len = (int(max_seq_len) - 4)
+        self.encoder_params = encoder_params
         ranks = {}
         for tok_str, tok_id in encoder_params["ranks"].items():
             # convert tok_str to bytes
@@ -324,7 +328,7 @@ class ChessParquetDataset(Dataset):
             self._prefix.append((p, total, n))
             total += n
 
-        self._total = total
+        self._total = max_rows if max_rows is not None else total
         self._valp = valp
         self._testp = testp
         self._trainp = 1 - valp - testp
@@ -377,29 +381,30 @@ class ChessParquetDataset(Dataset):
             return "<|BLACKWINS|>"
         elif val == 2:
             return "<|DRAW|>"
-        elif val <= 1000:
-            return "<|ELO1000|>"
-        elif val <= 1200:
-            return "<|ELO1200|>"
-        elif val <= 1400:
-            return "<|ELO1400|>"
-        elif val <= 1600:
-            return "<|ELO1600|>"
-        elif val <= 1800:
-            return "<|ELO1800|>"
-        elif val <= 2000:
-            return "<|ELO2000|>"
-        elif val <= 2200:
-            return "<|ELO2200|>"
-        elif val <= 2400:
-            return "<|ELO2400|>"
-        elif val <= 2600:
-            return "<|ELO2600|>"
-        #elif val <= 2800:
-        #    return "<|ELO2800|>"
-        #elif val <= 3000:
-        #    return "<|ELO3000|>"
         else:
+            if val <= self.max_elo_group:
+                if val <= 1000:
+                    return "<|ELO1000|>"
+                elif val <= 1200:
+                    return "<|ELO1200|>"
+                elif val <= 1400:
+                    return "<|ELO1400|>"
+                elif val <= 1600:
+                    return "<|ELO1600|>"
+                elif val <= 1800:
+                    return "<|ELO1800|>"
+                elif val <= 2000:
+                    return "<|ELO2000|>"
+                elif val <= 2200:
+                    return "<|ELO2200|>"
+                elif val <= 2400:
+                    return "<|ELO2400|>"
+                elif val <= 2600:
+                    return "<|ELO2600|>"
+                elif val <= 2800:
+                    return "<|ELO2800|>"
+                elif val <= 3000:
+                    return "<|ELO3000|>"
             return "<|ELOMAX|>"
 
     def __getitem__(self, idx: int) -> torch.Tensor:
@@ -417,30 +422,35 @@ class ChessParquetDataset(Dataset):
         def get_col(name: str):
             return row[name].to_pylist()[0] if name in row.schema.names else None
 
-        moves: str = get_col("moves") or ""
-        clk: Optional[str] = get_col("clk")
+        moves = get_col("moves") 
+        #clk = get_col("clk")
         welo = self._to_special_token(get_col("welo"))
         belo = self._to_special_token(get_col("belo"))
         inc = get_col("increment")
+        timeCtl = get_col("timeCtl")
         res = self._to_special_token(get_col("result"))
 
         header_parts = [
             str(welo),
             str(belo),
+            str(timeCtl),
             str(inc),
-            str(res),
         ]
         header = " ".join(header_parts)
 
         moves_tokens = moves.split()
-        clk_tokens = clk.split() if isinstance(clk, str) and len(clk) > 0 else []
-        interleaved = self._interleave_tokens(moves_tokens, clk_tokens)
+        #clk_tokens = clk.split()
+        #assert len(moves_tokens) == len(clk_tokens)
+        #interleaved = self._interleave_tokens(moves_tokens, clk_tokens)
+        interleaved = moves_tokens
 
         body = " ".join(interleaved)
-        full = f"{header} {body}" if body else header
-
+        full = f"{header} {body}"
         ids = self.encoding.encode(full, allowed_special="all")
-        return torch.tensor(ids, dtype=torch.long)
+        ids = torch.tensor(ids, dtype=torch.long)
+        if len(ids) > self.max_seq_len:
+            ids = ids[: self.max_seq_len]
+        return ids
 
 
 def collate_fn(NOOP, batch):
@@ -464,6 +474,7 @@ class MMCDataModule(L.LightningDataModule):
         max_elo_group,
         min_timectl,
         max_repeats,
+        max_seq_len,
         encoder_params,
         batch_size,
         num_workers,
@@ -473,6 +484,7 @@ class MMCDataModule(L.LightningDataModule):
         self.max_elo_group = max_elo_group
         self.min_timectl = min_timectl
         self.max_repeats = max_repeats
+        self.max_seq_len = max_seq_len
         self.encoder_params = encoder_params
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -485,6 +497,7 @@ class MMCDataModule(L.LightningDataModule):
                 self.max_elo_group,
                 self.min_timectl,
                 self.max_repeats,
+                self.max_seq_len,
                 self.encoder_params,
             )
             self.valset = ChessParquetDataset(
@@ -492,7 +505,9 @@ class MMCDataModule(L.LightningDataModule):
                 self.max_elo_group,
                 self.min_timectl,
                 1,
+                self.max_seq_len,
                 self.encoder_params,
+                max_rows=5_000_000 // self.batch_size
             )
         if stage == "validate":
             self.valset = ChessParquetDataset(
@@ -500,7 +515,9 @@ class MMCDataModule(L.LightningDataModule):
                 self.max_elo_group,
                 self.min_timectl,
                 1,
+                self.max_seq_len,
                 self.encoder_params,
+                max_rows=5_000_000 // self.batch_size
             )
 
     def train_dataloader(self):

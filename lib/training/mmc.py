@@ -39,6 +39,8 @@ class MMCModuleArgs:
 class MimicChessModule(L.LightningModule):
     def __init__(self, params: MMCModuleArgs):
         super().__init__()
+        self.max_ids = 0
+        self.mean_ids = 0
         self.params = params
         L.seed_everything(params.random_seed, workers=True)
         self.model_args = params.model_args
@@ -146,20 +148,25 @@ class MimicChessModule(L.LightningModule):
     def forward(self, tokens):
         return self.model(tokens)
 
-    def _get_loss(self, input):
-        pred = self(input[:,:-1]).transpose(1,2)
-        loss = F.cross_entropy(pred, input[:,1:], ignore_index=self.NOOP)
+    def _get_loss(self, inp):
+        pred = self(inp[:,:-1]).transpose(1,2)
+        # skip welo, belo, increment, and timeCtl tokens
+        loss = F.cross_entropy(pred[:,:,3:], inp[:,4:], ignore_index=self.NOOP)
         return loss
 
-    def training_step(self, input, batch_idx):
-        loss = self._get_loss(input)
+    def training_step(self, inp, batch_idx):
+        self.max_ids = max(self.max_ids, inp.shape[1])
+        self.mean_ids = (self.mean_ids * batch_idx + inp.shape[1]) / (batch_idx + 1)
+        self.log("max_ids", self.max_ids, prog_bar=True, sync_dist=True)
+        self.log("mean_ids", self.mean_ids, prog_bar=True, sync_dist=True)
+        loss = self._get_loss(inp)
         self.log("train_loss", loss, sync_dist=True)
         cur_lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", cur_lr, prog_bar=True, sync_dist=True)
         return loss
 
-    def validation_step(self, input, batch_idx):
-        valid_loss = self._get_loss(input)
+    def validation_step(self, inp, batch_idx):
+        valid_loss = self._get_loss(inp)
 
         if torch.isnan(valid_loss):
             raise Exception("Loss is NaN, training stopped.")

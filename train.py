@@ -69,6 +69,7 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
         max_elo_group=cfg["max_elo_group"],
         min_timectl=cfg["min_timectl"],
         max_repeats=cfg["max_repeats"],
+        max_seq_len=cfg["model_args"]["max_seq_len"],
         encoder_params=encoder_params,
         batch_size=cfg["batch_size"],
         num_workers=num_workers,
