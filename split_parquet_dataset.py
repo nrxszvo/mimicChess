@@ -163,11 +163,6 @@ def process_parquet_file(input_dir: Path, output_dir: Path,
 
         chunk_size = n_total // 500
         
-        # Initialize progressive writers only for files we need to create
-        train_writer = None
-        val_writer = None
-        test_writer = None
-        
         try:
             train_writer = ProgressiveParquetWriter(train_path)
             val_writer = ProgressiveParquetWriter(val_path)
@@ -187,12 +182,9 @@ def process_parquet_file(input_dir: Path, output_dir: Path,
            
         finally:
             # Ensure all writers are properly closed
-            if train_writer:
-                train_writer.close()
-            if val_writer:
-                val_writer.close()
-            if test_writer:
-                test_writer.close()
+            train_writer.close()
+            val_writer.close()
+            test_writer.close()
         
         # Report final counts only for files we actually created
         final_counts = []

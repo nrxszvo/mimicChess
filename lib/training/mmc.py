@@ -44,14 +44,14 @@ class MimicChessModule(L.LightningModule):
         self.params = params
         L.seed_everything(params.random_seed, workers=True)
         self.model_args = params.model_args
-        self.val_check_steps = params.val_check_steps * params.accumulate_grad_batches
+        self.val_check_steps = params.val_check_steps
         self.max_steps = params.max_steps
         if params.name:
             logger = TensorBoardLogger(".", name="L", version=params.name)
         else:
             logger = None
         val_check_interval = min(
-            self.val_check_steps, params.max_steps * params.accumulate_grad_batches
+            self.val_check_steps, params.max_steps
         )
         self.lr_scheduler_params = params.lr_scheduler_params
         if torch.cuda.is_available():
@@ -70,7 +70,7 @@ class MimicChessModule(L.LightningModule):
             "devices": params.devices,
             "precision": precision,
             "accelerator": accelerator,
-            "callbacks": [MyProgBar()],
+            "callbacks": [MyProgBar(refresh_rate=params.accumulate_grad_batches)],
             "accumulate_grad_batches": params.accumulate_grad_batches,
         }
         if params.outdir is not None:
@@ -108,14 +108,15 @@ class MimicChessModule(L.LightningModule):
         lr = self.lr_scheduler_params["lr"]
         optimizer = torch.optim.Adam(self.trainer.model.parameters(), lr=lr)
         name = self.lr_scheduler_params["name"]
+        max_steps = self.max_steps // self.params.accumulate_grad_batches
         if name == "Cosine":
             min_lr = self.lr_scheduler_params["min_lr"]
             scheduler = CosineAnnealingLR(
-                optimizer=optimizer, T_max=self.max_steps, eta_min=min_lr
+                optimizer=optimizer, T_max=max_steps, eta_min=min_lr
             )
             freq = 1
         elif name == "WarmUpCosine":
-            warmup_steps = self.lr_scheduler_params["warmup_steps"]
+            warmup_steps = self.lr_scheduler_params["warmup_steps"] // self.params.accumulate_grad_batches
             warmupLR = LinearLR(
                 optimizer=optimizer,
                 start_factor=1 / warmup_steps,
@@ -125,7 +126,7 @@ class MimicChessModule(L.LightningModule):
             min_lr = self.lr_scheduler_params["min_lr"]
             cosineLR = CosineAnnealingLR(
                 optimizer=optimizer,
-                T_max=self.max_steps - warmup_steps,
+                T_max=max_steps - warmup_steps,
                 eta_min=min_lr,
             )
             scheduler = SequentialLR(
@@ -148,31 +149,44 @@ class MimicChessModule(L.LightningModule):
     def forward(self, tokens):
         return self.model(tokens)
 
-    def _get_loss(self, inp):
-        pred = self(inp[:,:-1]).transpose(1,2)
+    def _get_loss(self, inp, outcome):
+        pred, outcome_pred = self(inp[:,:-1])
+        pred = pred.transpose(1,2)
         # skip welo, belo, increment, and timeCtl tokens
-        loss = F.cross_entropy(pred[:,:,3:], inp[:,4:], ignore_index=self.NOOP)
-        return loss
+        move_loss = F.cross_entropy(pred[:,:,3:], inp[:,4:], ignore_index=self.NOOP)
 
-    def training_step(self, inp, batch_idx):
+        outcome_pred = outcome_pred[:,3:]
+        # repeat outcome for each move
+        outcome = outcome[:,None].repeat(1, outcome_pred.shape[1])
+        outcome_loss = F.mse_loss(outcome_pred, outcome)
+        return move_loss, outcome_loss
+
+    def training_step(self, batch, batch_idx):
+        inp, res = batch
         self.max_ids = max(self.max_ids, inp.shape[1])
         self.mean_ids = (self.mean_ids * batch_idx + inp.shape[1]) / (batch_idx + 1)
         self.log("max_ids", self.max_ids, prog_bar=True, sync_dist=True)
         self.log("mean_ids", self.mean_ids, prog_bar=True, sync_dist=True)
-        loss = self._get_loss(inp)
+        move_loss, outcome_loss = self._get_loss(inp, res)
+        loss = move_loss + outcome_loss
         self.log("train_loss", loss, sync_dist=True)
+        self.log("train_move_loss", move_loss, sync_dist=True)
+        self.log("train_outcome_loss", outcome_loss, sync_dist=True)
         cur_lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", cur_lr, prog_bar=True, sync_dist=True)
         return loss
 
-    def validation_step(self, inp, batch_idx):
-        valid_loss = self._get_loss(inp)
-
-        if torch.isnan(valid_loss):
+    def validation_step(self, batch, batch_idx):
+        inp, res = batch
+        move_loss, outcome_loss = self._get_loss(inp, res)
+        loss = move_loss + outcome_loss
+        if torch.isnan(loss):
             raise Exception("Loss is NaN, training stopped.")
 
-        self.log("valid_loss", valid_loss, prog_bar=True, sync_dist=True)
-        return valid_loss
+        self.log("valid_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("valid_move_loss", move_loss, sync_dist=True)
+        self.log("valid_outcome_loss", outcome_loss, sync_dist=True)
+        return loss
 
     def fit(self, datamodule, ckpt=None):
         self.NOOP = datamodule.NOOP

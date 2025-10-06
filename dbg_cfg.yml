@@ -1,23 +1,25 @@
 model_args:
-  dim: 64 
-  n_layers: 16 
+  dim: 64
+  n_layers: 16
   n_heads: 32
-  n_kv_heads: 8 
+  n_kv_heads: 8
   multiple_of: 256
   ffn_dim_multiplier: 1.5 
   norm_eps: 1.e-5
   rope_theta: 10000
-  max_seq_len: 512 
+  max_seq_len: 768 
 lr_scheduler_params:
   lr: 3.e-4
   name: "WarmUpCosine"
   min_lr: 3.e-6
-  warmup_steps: 10 
-min_timectl: 60
-max_repeats: 10
+  warmup_steps: 25 
+max_elo_group: 2600
+min_timectl: 300
+max_repeats: 1
 accumulate_grad_batches: 2
-batch_size: 32 
-max_steps: 50 
-val_check_steps: 25 
+batch_size: 4 
+max_steps: 50
+val_check_steps: 50 
 strategy: auto 
 random_seed: 0
+

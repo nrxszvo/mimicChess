@@ -374,38 +374,78 @@ class ChessParquetDataset(Dataset):
                 out.append(clk_tokens[i])
         return out
 
-    def _to_special_token(self, val: int) -> str:
+    def _outcome(self, val: int) -> int:
         if val == 0:
-            return "<|WHITEWINS|>"
+            return 1
+            #return "<|WHITEWINS|>"
         elif val == 1:
-            return "<|BLACKWINS|>"
+            return -1
+            #return "<|BLACKWINS|>"
         elif val == 2:
-            return "<|DRAW|>"
+            return 0
+            #return "<|DRAW|>"
         else:
-            if val <= self.max_elo_group:
-                if val <= 1000:
-                    return "<|ELO1000|>"
-                elif val <= 1200:
-                    return "<|ELO1200|>"
-                elif val <= 1400:
-                    return "<|ELO1400|>"
-                elif val <= 1600:
-                    return "<|ELO1600|>"
-                elif val <= 1800:
-                    return "<|ELO1800|>"
-                elif val <= 2000:
-                    return "<|ELO2000|>"
-                elif val <= 2200:
-                    return "<|ELO2200|>"
-                elif val <= 2400:
-                    return "<|ELO2400|>"
-                elif val <= 2600:
-                    return "<|ELO2600|>"
-                elif val <= 2800:
-                    return "<|ELO2800|>"
-                elif val <= 3000:
-                    return "<|ELO3000|>"
-            return "<|ELOMAX|>"
+            raise Exception("Invalid outcome")
+        
+    def _elo_token(self, val: int) -> str:
+        if val <= self.max_elo_group:
+            if val <= 1000:
+                return "<|ELO1000|>"
+            elif val <= 1200:
+                return "<|ELO1200|>"
+            elif val <= 1400:
+                return "<|ELO1400|>"
+            elif val <= 1600:
+                return "<|ELO1600|>"
+            elif val <= 1800:
+                return "<|ELO1800|>"
+            elif val <= 2000:
+                return "<|ELO2000|>"
+            elif val <= 2200:
+                return "<|ELO2200|>"
+            elif val <= 2400:
+                return "<|ELO2400|>"
+            elif val <= 2600:
+                return "<|ELO2600|>"
+            elif val <= 2800:
+                return "<|ELO2800|>"
+            elif val <= 3000:
+                return "<|ELO3000|>"
+        return "<|ELOMAX|>"
+
+    def _timeCtl_token(self, val: int) -> str:
+        if val <= 60:
+            return "<|1MINUTE|>"
+        elif val <= 180:
+            return "<|3MINUTES|>"
+        elif val <= 300:
+            return "<|5MINUTES|>"
+        elif val <= 600:
+            return "<|10MINUTES|>"
+        elif val <= 900:
+            return "<|15MINUTES|>"
+        elif val <= 1800:
+            return "<|30MINUTES|>"
+        elif val <= 3600:
+            return "<|1HOUR|>"
+        else:
+            return "<|3HOURS|>"
+
+    def _increment_token(self, val: int) -> str:
+        if val == 0:
+            return "<|0SECONDS|>"
+        elif val == 1:
+            return "<|1SECOND|>"
+        elif val <= 5:
+            return "<|5SECONDS|>"
+        elif val <= 10:
+            return "<|10SECONDS|>"
+        elif val <= 15:
+            return "<|15SECONDS|>"
+        elif val == 30:
+            return "<|30SECONDS|>"
+        else:
+            return "<|MAXSECONDS|>"
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         local_idx = self._locate(idx)
@@ -424,17 +464,13 @@ class ChessParquetDataset(Dataset):
 
         moves = get_col("moves") 
         #clk = get_col("clk")
-        welo = self._to_special_token(get_col("welo"))
-        belo = self._to_special_token(get_col("belo"))
-        inc = get_col("increment")
-        timeCtl = get_col("timeCtl")
-        res = self._to_special_token(get_col("result"))
+        res = self._outcome(get_col("result"))
 
         header_parts = [
-            str(welo),
-            str(belo),
-            str(timeCtl),
-            str(inc),
+            self._elo_token(get_col("welo")),
+            self._elo_token(get_col("belo")),
+            self._timeCtl_token(get_col("timeCtl")),
+            self._increment_token(get_col("increment")),
         ]
         header = " ".join(header_parts)
 
@@ -450,21 +486,23 @@ class ChessParquetDataset(Dataset):
         ids = torch.tensor(ids, dtype=torch.long)
         if len(ids) > self.max_seq_len:
             ids = ids[: self.max_seq_len]
-        return ids
+        return ids, res
 
 
 def collate_fn(NOOP, batch):
     maxinp = 0
-    for ids in batch:
+    for ids, res in batch:
         maxinp = max(maxinp, len(ids))
 
     bs = len(batch)
     inputs = torch.full((bs, maxinp), NOOP, dtype=torch.long)
+    results = torch.empty((bs,), dtype=torch.float)
 
-    for i, ids in enumerate(batch):
+    for i, (ids, res) in enumerate(batch):
         inputs[i, : ids.shape[0]] = ids
+        results[i] = res
 
-    return inputs
+    return inputs, results
 
 
 class MMCDataModule(L.LightningDataModule):

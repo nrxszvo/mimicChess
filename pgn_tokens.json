@@ -112,6 +112,22 @@
         "<|ELO2600|>": 115,
         "<|ELO2800|>": 116,
         "<|ELO3000|>": 117,
-        "<|ELOMAX|>": 118
+        "<|ELOMAX|>": 118,
+        "<|ELOUNKNOWN|>": 119,
+        "<|3HOURS|>": 120,
+        "<|1HOUR|>": 121,
+        "<|30MINUTES|>": 122,
+        "<|15MINUTES|>": 123,
+        "<|10MINUTES|>": 124,
+        "<|5MINUTES|>": 125,
+        "<|3MINUTES|>": 126,
+        "<|1MINUTE|>": 127,
+        "<|0SECONDS|>": 128,
+        "<|1SECOND|>": 129,
+        "<|5SECONDS|>": 130,
+        "<|10SECONDS|>": 131,
+        "<|15SECONDS|>": 132,
+        "<|30SECONDS|>": 133,
+        "<|MAXSECONDS|>": 134
     }
 }
