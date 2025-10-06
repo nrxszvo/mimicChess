@@ -14,6 +14,7 @@ import tiktoken
 import numpy as np
 import lightning as L
 from torchdata.stateful_dataloader import StatefulDataLoader
+import torch.distributed as dist
 
 
 def init_worker(seed):
@@ -154,7 +155,6 @@ class FilteredRowIterator:
         self.testp = testp
         self.filter_expr = ds.field("timeCtl") >= pa.scalar(min_timectl, pa.int16())
         self.batch_size = batch_size
-        self.total_filtered_rows = 0
         self.max_repeats = max_repeats
         self.dataset = ds.dataset(str(self.file_path), format="parquet")
         # create schema that is subset of dataset schema
@@ -180,19 +180,23 @@ class FilteredRowIterator:
             columns=self.columns,
         )
         self._count_total_rows()
-
         self.max_rows = self.max_repeats * self.total_filtered_rows
         self.refresh_epoch()
 
     def refresh_epoch(self):
         self.current_batch = None
         self.current_batch_index = 0
-        self.batch_start = 0
+        self.batch_start = self.start_index
         self.total_rows_out = 0
 
     def _count_total_rows(self):
         """Count total filtered rows for cycling logic."""
-        self.total_filtered_rows = self.dataset.count_rows(filter=self.filter_expr)
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+        total_filtered_rows = self.dataset.count_rows(filter=self.filter_expr)
+        self.total_filtered_rows = total_filtered_rows // world_size
+        self.start_index = rank * self.total_filtered_rows
+        self.end_index = min((rank + 1) * self.total_filtered_rows, total_filtered_rows)
 
     def _load_next_batch(self):
         """Load the next batch of filtered rows."""
@@ -203,16 +207,16 @@ class FilteredRowIterator:
         indices = pa.array(
             range(
                 self.batch_start,
-                min(self.batch_start + self.batch_size, self.total_filtered_rows),
+                min(self.batch_start + self.batch_size, self.end_index),
             )
         )
         if len(indices) < self.batch_size:
             # concatenate remaining indices from start_index
             rest = self.batch_size - len(indices)
             indices = pa.concat_arrays(
-                [indices, pa.array(range(rest))]
+                [indices, pa.array(range(self.start_index, self.start_index + rest))]
             )
-            self.batch_start = rest
+            self.batch_start = self.start_index + rest
         else:
             self.batch_start += self.batch_size
 

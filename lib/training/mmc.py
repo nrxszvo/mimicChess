@@ -72,6 +72,7 @@ class MimicChessModule(L.LightningModule):
             "accelerator": accelerator,
             "callbacks": [MyProgBar(refresh_rate=params.accumulate_grad_batches)],
             "accumulate_grad_batches": params.accumulate_grad_batches,
+            "use_distributed_sampler": False,
         }
         if params.outdir is not None:
             self.trainer_kwargs["callbacks"].append(
