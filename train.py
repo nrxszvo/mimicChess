@@ -50,6 +50,8 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
     with open(cfg) as f:
         cfg = yaml.load(f, Loader=yaml.CLoader)
     cfg["commit"] = commit
+    if cfg['strategy'] == 'ddp':
+        torch.distributed.init_process_group()
 
     save_path = os.path.join(save_path, name)
     os.makedirs(save_path, exist_ok=True)
@@ -75,6 +77,7 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
         num_workers=num_workers,
     )
 
+    device_count = torch.cuda.device_count()
     mmc = MimicChessModule(
         MMCModuleArgs(
             name=name,
@@ -85,7 +88,7 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
             accumulate_grad_batches=cfg["accumulate_grad_batches"],
             random_seed=cfg["random_seed"],
             strategy=cfg["strategy"],
-            devices=1,
+            devices=device_count,
             outdir=save_path,
         )
     )
