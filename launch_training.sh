@@ -56,6 +56,6 @@ fi
 commit=$(git rev-parse HEAD)
 echo "commit: ${commit}"
 
-cmd="OMP_NUM_THREADS=${nthread} torchrun --nnodes=${nnodes} --node-rank=${node_rank} --nproc-per-node=${nproc} train.py --name ${name} --commit ${commit} --cfg ${cfg} --num_nodes ${nnodes}"
+cmd="OMP_NUM_THREADS=${nthread} torchrun --nnodes=${nnodes} --node-rank=${node_rank} --nproc-per-node=${nproc} train.py --name ${name} --commit ${commit} --cfg ${cfg} --datadir ~/Virginia/splits/splits"
 echo $cmd
 eval $cmd

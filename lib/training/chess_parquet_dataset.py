@@ -102,7 +102,7 @@ def count_filtered_rows(file_path: Path, min_timectl: int) -> int:
                 1 for v in timectl_col.to_pylist() if v is not None and v >= min_timectl
             )
 
-        return count
+        return count // dist.get_world_size()
     except Exception as e:
         print(f"Error counting rows in {file_path}: {e}")
         return 0
@@ -126,7 +126,7 @@ def get_file_counts_with_repeats(
 
     for file_path in storage_files:
         count = count_filtered_rows(file_path, min_timectl)
-        file_counts[file_path] = count
+        file_counts[file_path] = count 
         max_rows = max(max_rows, count)
 
     for fp in file_counts:
@@ -281,7 +281,7 @@ class ChessParquetDataset(Dataset):
         max_seq_len: int,
         encoder_params: dict,
         columns: Optional[list[str]] = None,
-        iterator_batch_size: int = 1000,
+        iterator_batch_size: int = 10000,
         valp: float = 0.05,
         testp: float = 0.05,
         max_rows: Optional[int] = None,
@@ -337,6 +337,7 @@ class ChessParquetDataset(Dataset):
         self._testp = testp
         self._trainp = 1 - valp - testp
         self.iterators = []
+        print(f'loading {len(self.file_counts)} files with {iterator_batch_size} rows per iterator')
         for file_path, count in self.file_counts.items():
             self.iterators.append(
                 FilteredRowIterator(file_path, min_timectl, max_repeats, iterator_batch_size)

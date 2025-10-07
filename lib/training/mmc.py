@@ -166,15 +166,15 @@ class MimicChessModule(L.LightningModule):
         inp, res = batch
         self.max_ids = max(self.max_ids, inp.shape[1])
         self.mean_ids = (self.mean_ids * batch_idx + inp.shape[1]) / (batch_idx + 1)
-        self.log("max_ids", self.max_ids, prog_bar=True, sync_dist=True)
-        self.log("mean_ids", self.mean_ids, prog_bar=True, sync_dist=True)
+        self.log("max_ids", self.max_ids, prog_bar=True)
+        self.log("mean_ids", self.mean_ids, prog_bar=True)
         move_loss, outcome_loss = self._get_loss(inp, res)
         loss = move_loss + outcome_loss
-        self.log("train_loss", loss, sync_dist=True)
-        self.log("train_move_loss", move_loss, sync_dist=True)
-        self.log("train_outcome_loss", outcome_loss, sync_dist=True)
+        self.log("train_loss", loss)
+        self.log("train_move_loss", move_loss)
+        self.log("train_outcome_loss", outcome_loss)
         cur_lr = self.trainer.optimizers[0].param_groups[0]["lr"]
-        self.log("lr", cur_lr, prog_bar=True, sync_dist=True)
+        self.log("lr", cur_lr, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -185,8 +185,8 @@ class MimicChessModule(L.LightningModule):
             raise Exception("Loss is NaN, training stopped.")
 
         self.log("valid_loss", loss, prog_bar=True, sync_dist=True)
-        self.log("valid_move_loss", move_loss, sync_dist=True)
-        self.log("valid_outcome_loss", outcome_loss, sync_dist=True)
+        self.log("valid_move_loss", move_loss, prog_bar=True, sync_dist=True)
+        self.log("valid_outcome_loss", outcome_loss, prog_bar=True, sync_dist=True)
         return loss
 
     def fit(self, datamodule, ckpt=None):

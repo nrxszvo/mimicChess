@@ -50,8 +50,6 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
     with open(cfg) as f:
         cfg = yaml.load(f, Loader=yaml.CLoader)
     cfg["commit"] = commit
-    if cfg['strategy'] == 'ddp':
-        torch.distributed.init_process_group()
 
     save_path = os.path.join(save_path, name)
     os.makedirs(save_path, exist_ok=True)
