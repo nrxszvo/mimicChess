@@ -1,5 +1,5 @@
 model_args:
-  dim: 2048 
+  dim: 1536 
   n_layers: 16
   n_heads: 32
   n_kv_heads: 8
@@ -13,12 +13,13 @@ lr_scheduler_params:
   name: WarmUpCosine
   min_lr: 3.e-6
   warmup_steps: 25000
+outcome_weight: 0.1
 max_elo_group: 2600
 min_timectl: 300
 max_repeats: 10
-accumulate_grad_batches: 4
-batch_size: 4 
+accumulate_grad_batches: 8
+batch_size: 8 
 max_steps: 4.e+6
-val_check_steps: 400000 
+val_checks: 10
 strategy: ddp
 random_seed: 0

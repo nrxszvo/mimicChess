@@ -80,9 +80,10 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
         MMCModuleArgs(
             name=name,
             model_args=ModelArgs(cfg["model_args"]),
+            outcome_weight=cfg['outcome_weight'],
             lr_scheduler_params=cfg["lr_scheduler_params"],
             max_steps=int(cfg["max_steps"]),
-            val_check_steps=int(cfg["val_check_steps"]),
+            val_checks=int(cfg["val_checks"]),
             accumulate_grad_batches=cfg["accumulate_grad_batches"],
             random_seed=cfg["random_seed"],
             strategy=cfg["strategy"],

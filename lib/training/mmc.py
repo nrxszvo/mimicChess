@@ -26,9 +26,10 @@ class MyProgBar(TQDMProgressBar):
 class MMCModuleArgs:
     name: str
     model_args: ModelArgs
+    outcome_weight: float
     lr_scheduler_params: dict
     max_steps: int
-    val_check_steps: int
+    val_checks: int
     accumulate_grad_batches: int
     random_seed: Optional[int] = 0
     strategy: Optional[str] = "auto"
@@ -44,15 +45,11 @@ class MimicChessModule(L.LightningModule):
         self.params = params
         L.seed_everything(params.random_seed, workers=True)
         self.model_args = params.model_args
-        self.val_check_steps = params.val_check_steps
         self.max_steps = params.max_steps
         if params.name:
             logger = TensorBoardLogger(".", name="L", version=params.name)
         else:
             logger = None
-        val_check_interval = min(
-            self.val_check_steps, params.max_steps
-        )
         self.lr_scheduler_params = params.lr_scheduler_params
         if torch.cuda.is_available():
             precision = "bf16-mixed" if torch.cuda.is_bf16_supported() else 16
@@ -64,13 +61,13 @@ class MimicChessModule(L.LightningModule):
         self.trainer_kwargs = {
             "logger": logger,
             "max_steps": params.max_steps,
-            "val_check_interval": val_check_interval,
+            "val_check_interval": params.max_steps // params.val_checks,
             "check_val_every_n_epoch": None,
             "strategy": params.strategy,
             "devices": params.devices,
             "precision": precision,
             "accelerator": accelerator,
-            "callbacks": [MyProgBar(refresh_rate=params.accumulate_grad_batches)],
+            "callbacks": [MyProgBar()],
             "accumulate_grad_batches": params.accumulate_grad_batches,
             "use_distributed_sampler": False,
         }
@@ -117,7 +114,7 @@ class MimicChessModule(L.LightningModule):
             )
             freq = 1
         elif name == "WarmUpCosine":
-            warmup_steps = self.lr_scheduler_params["warmup_steps"] // self.params.accumulate_grad_batches
+            warmup_steps = self.lr_scheduler_params["warmup_steps"]
             warmupLR = LinearLR(
                 optimizer=optimizer,
                 start_factor=1 / warmup_steps,
@@ -169,7 +166,7 @@ class MimicChessModule(L.LightningModule):
         self.log("max_ids", self.max_ids, prog_bar=True)
         self.log("mean_ids", self.mean_ids, prog_bar=True)
         move_loss, outcome_loss = self._get_loss(inp, res)
-        loss = move_loss + outcome_loss
+        loss = move_loss + self.params.outcome_weight*outcome_loss
         self.log("train_loss", loss)
         self.log("train_move_loss", move_loss)
         self.log("train_outcome_loss", outcome_loss)
@@ -180,7 +177,7 @@ class MimicChessModule(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         inp, res = batch
         move_loss, outcome_loss = self._get_loss(inp, res)
-        loss = move_loss + outcome_loss
+        loss = move_loss + self.params.outcome_weight*outcome_loss
         if torch.isnan(loss):
             raise Exception("Loss is NaN, training stopped.")
 

@@ -180,7 +180,7 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
-class OutcomePredictor(nn.Module):
+class OutcomeFeedForward(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -204,7 +204,7 @@ class OutcomePredictor(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, layer_id: int, args: ModelArgs, last: bool = False):
+    def __init__(self, layer_id: int, args: ModelArgs):
         super().__init__()
 
         self.attention = Attention(args)
@@ -217,16 +217,6 @@ class TransformerBlock(nn.Module):
         self.layer_id = layer_id
         self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
         self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
-        self.last = last
-        if last:
-            self.outcome_norm = RMSNorm(args.dim, eps=args.norm_eps)
-            self.outcome_predictor = OutcomePredictor(
-                dim=args.dim,
-                hidden_dim=4 * args.dim,
-                multiple_of=args.multiple_of,
-                ffn_dim_multiplier=args.ffn_dim_multiplier,
-            )
-
 
     def forward(
         self,
@@ -237,9 +227,34 @@ class TransformerBlock(nn.Module):
     ):
         h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
         out = h + self.feed_forward(self.ffn_norm(h))
-        if self.last:
-            return out, self.outcome_predictor(self.outcome_norm(out))
         return out
+
+
+class TransformerOutcomePredictor(nn.Module):
+    def __init__(self, layer_id: int, args: ModelArgs):
+        super().__init__()
+
+        self.attention = Attention(args)
+        self.feed_forward = OutcomeFeedForward(
+            dim=args.dim,
+            hidden_dim=4 * args.dim,
+            multiple_of=args.multiple_of,
+            ffn_dim_multiplier=args.ffn_dim_multiplier,
+        )
+        self.layer_id = layer_id
+        self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
+        self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: Optional[torch.Tensor],
+    ):
+        h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
+        return self.feed_forward(self.ffn_norm(h))
+
 
 
 class Transformer(nn.Module):
@@ -254,9 +269,10 @@ class Transformer(nn.Module):
         )
 
         self.layers = torch.nn.ModuleList()
-        for layer_id in range(params.n_layers-1):
+        for layer_id in range(params.n_layers):
             self.layers.append(TransformerBlock(layer_id, params))
-        self.last_layer = TransformerBlock(params.n_layers-1, params, last=True)
+
+        self.outcome_predictor = TransformerOutcomePredictor(params.n_layers, params)
 
         self.norm = RMSNorm(params.dim, eps=params.norm_eps)
         self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
@@ -281,6 +297,7 @@ class Transformer(nn.Module):
 
         for layer in self.layers:
             h = layer(h, start_pos, freqs_cis, mask)
-        h, outcome = self.last_layer(h, start_pos, freqs_cis, mask)
-        h = self.norm(h)
-        return self.output(h), torch.tanh(outcome.squeeze(-1))
+
+        outcome = self.outcome_predictor(h, start_pos, freqs_cis, mask)
+
+        return self.output(self.norm(h)), torch.tanh(outcome.squeeze(-1))

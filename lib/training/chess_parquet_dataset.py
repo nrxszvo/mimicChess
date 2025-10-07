@@ -311,7 +311,7 @@ class ChessParquetDataset(Dataset):
             if columns is not None
             else [
                 "moves",
-                "clk",
+                #"clk",
                 "welo",
                 "belo",
                 "increment",
