@@ -1,12 +1,12 @@
 import argparse
 import os
 import json
+import subprocess
 from datetime import datetime
-
 import torch
 import yaml
-import subprocess
 from lib.training import MimicChessModule, MMCModuleArgs, MMCDataModule, ModelArgs
+
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--cfg", default="cfg.yml", help="yaml config file")
@@ -57,7 +57,6 @@ def main(cfg, datadir, token_file, num_workers, save_path, name, ckpt, commit):
     torch.set_float32_matmul_precision("high")
     torch.manual_seed(cfg["random_seed"])
 
-    num_workers = num_workers
     if num_workers == -1:
         num_workers = os.cpu_count() - 1
     with open(token_file) as f:

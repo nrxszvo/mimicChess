@@ -1,5 +1,4 @@
 import os
-import random
 from pathlib import Path
 from typing import Tuple, Optional
 from functools import partial
@@ -110,7 +109,7 @@ def count_filtered_rows(file_path: Path, min_timectl: int) -> int:
 
 def get_file_counts_with_repeats(
     storage_files: list[Path], min_timectl: int, max_repeats: int
-) -> Tuple[int, dict[Path, int]]:
+) -> dict[Path, int]:
     """
     Find the maximum number of filtered rows across all storage files.
 
@@ -144,23 +143,18 @@ class FilteredRowIterator:
         file_path: Path,
         min_timectl: int,
         max_repeats: int,
-        batch_size: int = 1000,
-        valp: float = 0.05,
-        testp: float = 0.05,
+        batch_size: int = 1_000_000,
     ):
         self.file_path = file_path
         self.min_timectl = min_timectl
-        self.trainp = 1 - valp - testp
-        self.valp = valp
-        self.testp = testp
         self.filter_expr = ds.field("timeCtl") >= pa.scalar(min_timectl, pa.int16())
-        self.batch_size = batch_size
         self.max_repeats = max_repeats
+        self.batch_size = batch_size
         self.dataset = ds.dataset(str(self.file_path), format="parquet")
         # create schema that is subset of dataset schema
         self.columns = [
             "moves",
-            "clk",
+            #"clk",
             "result",
             "welo",
             "belo",
@@ -197,6 +191,7 @@ class FilteredRowIterator:
         self.total_filtered_rows = total_filtered_rows // world_size
         self.start_index = rank * self.total_filtered_rows
         self.end_index = min((rank + 1) * self.total_filtered_rows, total_filtered_rows)
+
 
     def _load_next_batch(self):
         """Load the next batch of filtered rows."""
@@ -281,7 +276,6 @@ class ChessParquetDataset(Dataset):
         max_seq_len: int,
         encoder_params: dict,
         columns: Optional[list[str]] = None,
-        iterator_batch_size: int = 10000,
         valp: float = 0.05,
         testp: float = 0.05,
         max_rows: Optional[int] = None,
@@ -337,20 +331,19 @@ class ChessParquetDataset(Dataset):
         self._testp = testp
         self._trainp = 1 - valp - testp
         self.iterators = []
-        print(f'loading {len(self.file_counts)} files with {iterator_batch_size} rows per iterator')
-        for file_path, count in self.file_counts.items():
+        for file_path, _ in self.file_counts.items():
             self.iterators.append(
-                FilteredRowIterator(file_path, min_timectl, max_repeats, iterator_batch_size)
+                FilteredRowIterator(file_path, min_timectl, max_repeats)
             )
 
-    def refresh_epoch(self, seed: Optional[int] = None) -> None:
+    def refresh_epoch(self) -> None:
         for iterator in self.iterators:
             iterator.refresh_epoch()
 
     def __len__(self) -> int:
         return self._total
 
-    def _locate(self, idx: int) -> Tuple[Path, int]:
+    def _locate(self, idx: int) -> int:
         if idx < 0 or idx >= self._total:
             raise IndexError(idx)
         # binary search over prefix
